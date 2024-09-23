@@ -4,7 +4,7 @@ Import og rens af data om behnadlinger af lovforslag
 ====================================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 11-09-2024
+Sidste opdatering: 23-09-2024
 
 Formålet ved dette skript er at indlæse data om de folketingsdebatter,
 som finder sted ved 1., 2. og 3. behandling i salen, fra diverse
@@ -29,6 +29,11 @@ import_files = [
     for f in os.listdir(import_folder)
     if os.path.isfile(os.path.join(import_folder, f))
 ]
+
+# Import af mappingtabel med partigrupper og roller
+mapping_parties = pd.read_excel(
+    "input/mapping_tabeller.xlsx", sheet_name="Partigrupper"
+)
 
 
 # %% Egen funtion, som importerer en lokal HTML fil og omdanner den til BS4 objekt
@@ -253,6 +258,28 @@ def combine_all_statements(html_files: list[str], folder: str = None) -> pd.Data
     return all_content
 
 
+# %% Egen funktion til beregning af antal ord i en tekst
+
+
+def count_words(text: str) -> int:
+    """
+    Beregner antallet af ord i en tekts.
+    Der skal være mindst et mellemrum mellem 2 ord for
+    at de kan blive optalt som 2 selvstændige ord.
+
+    Args:
+        text (str): _description_
+
+    Returns:
+        int: _description_
+    """
+
+    # Split by any non-word characters (like punctuation) and
+    # filter out empty strings, then count the N of words
+    n_words = len(re.findall(r"\b\w+\b", text))
+    return n_words
+
+
 # %% Import og rens af data
 
 print("Import og rens af data er nu i gang...")
@@ -263,7 +290,8 @@ all_debates = combine_all_statements(import_files, import_folder)
 
 # Eftersom ikke alle tider er angivet i de allerældste data er vi
 # nødt til at bruge en form for afrunding for de manglende tider
-all_debates["Tid"] = all_debates["Tid"].ffill()
+all_debates["Tid"] = all_debates.groupby("Kilde")["Tid"].bfill()
+all_debates["Tid"] = all_debates.groupby("Kilde")["Tid"].ffill()
 
 # Derudover kan der nogle gange opstå intervaller i start/slut af teksterne,
 # så disse bliver fjernet i alle relevante kolonner
@@ -330,9 +358,76 @@ all_debates = all_debates.drop(columns=cols_for_id)
 print(f"Bemærk: {len(all_debates)} rækker af data indsamlet er renset.")
 
 
+# %% Markering af partigruppe
+
+# Kolonnen "Navn" indeholder en forkortelse for partigruppe
+all_debates["PartiGruppeKort"] = all_debates["Navn"].str.extract(r"\((.*?)\)")
+
+# Der er deltagere i debatten, som ikke hører til en partigruppe
+# som fx Folketingets formand, udlændingeministeren osv.
+all_debates["PartiGruppeKort"] = all_debates["PartiGruppeKort"].fillna(
+    all_debates["Rolle"]
+)
+
+# Vi tilføjer partigruppens fulde navn ved brug af vores egen mapping
+all_debates = pd.merge(all_debates, mapping_parties, how="left", on="PartiGruppeKort")
+
+print("Markering af partigruppe færdig.")
+
+
+# %% Beregning af debatlængde
+
+# Start og sluttidspunkt for debat
+id_cols = ["År", "Sæson", "BehandlingNr"]
+cols_to_keep = ["DebatStartTid", "DebatSlutTid"]
+debate_duration = all_debates.copy()
+debate_duration["DebatStartTid"] = debate_duration.groupby(id_cols)["Tid"].transform(
+    "min"
+)
+debate_duration["DebatSlutTid"] = debate_duration.groupby(id_cols)["Tid"].transform(
+    "max"
+)
+debate_duration = debate_duration.drop_duplicates(subset=id_cols)
+debate_duration = debate_duration.reset_index(drop=True)
+debate_duration = debate_duration[id_cols + cols_to_keep]
+
+# Debattens længde beregnes i antal minutter
+debate_duration["DebatLængdeMinutter"] = (
+    debate_duration["DebatSlutTid"] - debate_duration["DebatStartTid"]
+).dt.total_seconds() / 60
+
+print("Beregning af debatlængde færdig.")
+
+
+# %% Beregning af udtalelseslængde
+
+# Først beregner vi udtalelseslængde i tid (antal minutter)
+id_cols = ["År", "Sæson", "BehandlingNr"]
+all_debates["NæsteTaleBegynder"] = all_debates.groupby(id_cols)["Tid"].shift(-1)
+all_debates["UdtalelseLængdeMinutter"] = (
+    all_debates["NæsteTaleBegynder"] - all_debates["Tid"]
+).dt.total_seconds() / 60
+all_debates = all_debates.drop(columns="NæsteTaleBegynder")
+
+# Hvis en tale varer 0 eller NAN minutter, så er det fordi det er
+# en meget kort tale - vi markerer den derfor med 1 minuts længde
+all_debates["UdtalelseLængdeMinutter"] = np.where(
+    (all_debates["UdtalelseLængdeMinutter"] == 0)
+    | (all_debates["UdtalelseLængdeMinutter"].isna()),
+    1,
+    all_debates["UdtalelseLængdeMinutter"],
+)
+
+# Efter det beregner vi udtalelseslængde i antal ord
+all_debates["UdtalelseLængdeOrd"] = all_debates["Udtalelse"].apply(count_words)
+
+print("Beregning af udtalelselængde færdig.")
+
+
 # %% Eksport af de rensede data
 
 all_debates.to_parquet("output/ft_behandlinger.parquet")
+debate_duration.to_parquet("output/ft_debatlængde.parquet")
 print("Rensede data på debatter er nu klar til brug i 'output' mappen.")
 print("FÆRDIG.")
 
