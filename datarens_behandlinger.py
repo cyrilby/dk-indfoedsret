@@ -350,6 +350,8 @@ all_debates["UdtalelseId"] = (
     + "-"
     + all_debates["SæsonId"]
     + "-"
+    + all_debates["BehandlingNr"].astype(str)
+    + "-"
     + all_debates["UdtalelseId"]
 )
 cols_for_id = ["SæsonId"]
