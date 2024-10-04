@@ -4,7 +4,7 @@ Tekstanalyse af taler under debatterne (emner)
 ==============================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 01-10-2024
+Sidste opdatering: 03-10-2024
 
 Formålet ved dette skript er at tage de rensede data fra debatterne,
 som indeholder diverse taler ("udtalelser"), og bruge dem til klassisk
@@ -18,7 +18,7 @@ kategorier. Alt i den her skript foregår lokalt uden at bruge eksterne API'er.
 import pandas as pd
 import numpy as np
 from gensim import corpora
-from gensim.models import LdaModel
+from gensim.models import LdaModel, CoherenceModel
 from tqdm import tqdm
 from typing import Tuple
 
@@ -40,6 +40,17 @@ speech_tokens = speech_tokens[
 ].copy()
 
 
+# %% Egen funktion til beregning af "coherence score" for LDA modeller
+
+
+def compute_coherence_score(ldamodel, doc_term_matrix, dictionary, model_tokens):
+    coherence_model_lda = CoherenceModel(
+        model=ldamodel, texts=model_tokens, dictionary=dictionary, coherence="c_v"
+    )
+    coherence_score = coherence_model_lda.get_coherence()
+    return coherence_score
+
+
 # %% Egen funktion til test af enkelt LDA model
 
 
@@ -50,7 +61,7 @@ def fit_lda_model(
     n_topics: int,
     return_all: bool = False,
     print_all: bool = False,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+) -> Tuple[float, pd.DataFrame, pd.DataFrame]:
     """
     Tager en nested liste med ord og grupperer listerne med ord på øverste
     niveau i diverse temaer (emner) pba. de ord, listene indeholder.
@@ -69,9 +80,9 @@ def fit_lda_model(
         resultater skal udskrives undervejs. Per definition 'False'.
 
     Returns:
-        Tuple[pd.DataFrame, pd.DataFrame]: datasæt med de endelige resultater
-        fra modellen, herunder de korrekte emner for hver liste med enkelte ord,
-        samt datasæt med de enkelte ord, som indgår i de diverse emner
+        Tuple[LdaModel, pd.DataFrame, pd.DataFrame]: coherence_score + datasæt med de
+        endelige resultater fra modellen, herunder de korrekte emner for hver liste
+        med enkelte ord, samt datasæt med de ord, som indgår i de diverse emner
     """
 
     # Vi må ikke have blanke felter
@@ -96,6 +107,11 @@ def fit_lda_model(
         id2word=dictionary,
         passes=50,
         random_state=173,
+    )
+
+    # Vi beregner "coherence score" for modellen
+    coherence_score = compute_coherence_score(
+        ldamodel, doc_term_matrix, dictionary, model_tokens
     )
 
     # Her finder vi de automatisk skabte emner
@@ -136,7 +152,7 @@ def fit_lda_model(
         med_prob = round(100 * auto_topics["Sandsynlighed"].median(), 1)
         print(f"Test af LDA tekstmodel med {n_topics} emner færdig.")
         print(f"Mediansandsynlighed for korrekt klassificering: {med_prob}%.")
-    return auto_topics, topics_words
+    return coherence_score, auto_topics, topics_words
 
 
 # %% Automatisk test af LDA emnemodeller
@@ -146,17 +162,25 @@ print("Automatisk test af LDA emnemodeller er nu i gang...")
 # Vi tester modeller med mellem 5 og 20 emner for at finde den mest præcise
 n_topics = np.arange(5, 21)
 median_probability = []
+coherence_score = []
 
 for tmp_n in tqdm(n_topics, total=len(n_topics)):
-    auto_topics, _ = fit_lda_model(speech_tokens, "Token", "UdtalelseId", tmp_n)
+    coh_score, auto_topics, _ = fit_lda_model(
+        speech_tokens, "Token", "UdtalelseId", tmp_n
+    )
     med_prob = auto_topics["Sandsynlighed"].median()
     median_probability.append(med_prob)
+    coherence_score.append(coh_score)
 
 # Vi opsummerer resultaterne af vores tests
 model_tests = pd.DataFrame(
-    {"AntalEmner": n_topics, "MedianResultat": median_probability}
+    {
+        "AntalEmner": n_topics,
+        "MedianResultat": median_probability,
+        "CoherenceScore": coherence_score,
+    }
 )
-model_tests = model_tests.sort_values("MedianResultat", ascending=False)
+model_tests = model_tests.sort_values("CoherenceScore", ascending=False)
 model_tests = model_tests.reset_index(drop=True)
 
 print("Automatisk test af LDA emnemodeller færdig. Her er resultaterne:")
@@ -180,7 +204,7 @@ names for the topics.
 
 # Vi vælger den bedste model og bruger den til at gruppere udtalelserne i emner
 best_model_n = model_tests["AntalEmner"].iloc[0]
-auto_topics, auto_words = fit_lda_model(
+coh_score, auto_topics, auto_words = fit_lda_model(
     speech_tokens, "Token", "UdtalelseId", best_model_n
 )
 
@@ -230,6 +254,16 @@ topics_to_check = {
 # Tjek for, om ovennævnte ord nævnes i de individuelle udtalelser
 for var_name, var_val in zip(topics_to_check.keys(), topics_to_check.values()):
     manual_topics[var_name] = manual_topics["Token"].str.contains(var_val)
+
+# Vi konverterer datane fra "bredt" til "langt" format
+manual_topics = pd.melt(
+    manual_topics,
+    id_vars="UdtalelseId",
+    value_vars=manual_topics.columns[2:],
+    value_name="ReferererTilEmne",
+    var_name="Emne",
+)
+manual_topics["ReferererTilEmne"] = manual_topics["ReferererTilEmne"].astype(int)
 
 print("Manuelle tjek for, at visse ord bliver nævnt færdig.")
 
