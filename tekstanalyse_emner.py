@@ -1,10 +1,10 @@
 """
-==============================================
-Tekstanalyse af taler under debatterne (emner)
-==============================================
+==========================================
+Tekstanalyse ved brug af klassiske metoder
+==========================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 03-10-2024
+Sidste opdatering: 12-11-2024
 
 Formålet ved dette skript er at tage de rensede data fra debatterne,
 som indeholder diverse taler ("udtalelser"), og bruge dem til klassisk
@@ -15,6 +15,7 @@ kategorier. Alt i den her skript foregår lokalt uden at bruge eksterne API'er.
 # %% Generel opsætning
 
 # Import af relevante pakker
+import os
 import pandas as pd
 import numpy as np
 from gensim import corpora
@@ -30,25 +31,74 @@ mapping_topics = pd.read_excel("input/mapping_tabeller.xlsx", sheet_name="Emner"
     ["EmneNr", "Emne"]
 ]
 
+# Import af modeltest og emner fra tidligere kørsler af skriptet
+file_path_model_tests = "output/results_topics_model_stats.parquet"
+file_path_auto_topics = "output/results_topics_auto.parquet"
+file_path_auto_words = "output/results_words_auto.parquet"
+file_path_manual_topics = "output/results_topics_manual.parquet"
+prev_model_tests = (
+    pd.read_parquet(file_path_model_tests)
+    if os.path.exists(file_path_model_tests)
+    else None
+)
+prev_auto_topics = (
+    pd.read_parquet(file_path_auto_topics)
+    if os.path.exists(file_path_auto_topics)
+    else None
+)
+prev_auto_words = (
+    pd.read_parquet(file_path_auto_words)
+    if os.path.exists(file_path_auto_words)
+    else None
+)
+prev_manual_topics = (
+    pd.read_parquet(file_path_manual_topics)
+    if os.path.exists(file_path_manual_topics)
+    else None
+)
+
 # Vi skal kun bruge politiske udtalelser, så vi sorterer
 # folketingets formands taler fra
-relevant_speeches = all_debates[all_debates["PartiGruppe"] != "Folketingets formand"][
-    "UdtalelseId"
-].tolist()
+condition_1 = ~(all_debates["PartiGruppe"] == "Folketingets formand")
+condition_2 = ~(all_debates["Rolle"].str.lower().str.contains("formand"))
+relevant_speeches = all_debates[(condition_1) | (condition_2)]["UdtalelseId"].tolist()
 speech_tokens = speech_tokens[
     speech_tokens["UdtalelseId"].isin(relevant_speeches)
 ].copy()
+
+# Vi tilføjer en kolonne, som viser lovforslagssæson
+speech_tokens["Sæson"] = (
+    speech_tokens["UdtalelseId"].str.split("-").str[:2].str.join("-")
+)
 
 
 # %% Egen funktion til beregning af "coherence score" for LDA modeller
 
 
-def compute_coherence_score(ldamodel, doc_term_matrix, dictionary, model_tokens):
+def compute_coherence_score(ldamodel, dictionary, model_tokens):
     coherence_model_lda = CoherenceModel(
         model=ldamodel, texts=model_tokens, dictionary=dictionary, coherence="c_v"
     )
     coherence_score = coherence_model_lda.get_coherence()
     return coherence_score
+
+
+# %% Egen funktion til beregning af "perplexity score" for LDA modeller
+
+
+def compute_perplexity_score(ldamodel, doc_term_matrix):
+    """
+    Compute the perplexity score for a given LDA model.
+
+    Args:
+        ldamodel (LdaModel): Trained LDA model.
+        doc_term_matrix (list): Bag-of-words representation of the documents.
+
+    Returns:
+        float: Perplexity score of the LDA model.
+    """
+    perplexity_score = ldamodel.log_perplexity(doc_term_matrix)
+    return perplexity_score
 
 
 # %% Egen funktion til test af enkelt LDA model
@@ -59,6 +109,7 @@ def fit_lda_model(
     tokens_col: str,
     id_col: str,
     n_topics: int,
+    calc_score: bool = False,
     return_all: bool = False,
     print_all: bool = False,
 ) -> Tuple[float, pd.DataFrame, pd.DataFrame]:
@@ -74,6 +125,8 @@ def fit_lda_model(
         tokens_col (str): navn på kolonnen, som indeholder de enkelte tokens
         id_col (str): navn på kolonnen, som indeholder ID-oplysningerne
         n_topics (int): antal emner at bruge i modellen
+        calc_score (bool, optional): om perplexity score burde
+        beregnes når modellen er blevet testet. Pr. definition False
         return_all (bool, optional): om alle foreslåede temaer (emner)
         skal ses i outputtet. Pr. definition 'False'.
         print_all (bool, optional): om mere information om modellen og dens
@@ -109,13 +162,19 @@ def fit_lda_model(
         random_state=173,
     )
 
-    # Vi beregner "coherence score" for modellen
-    coherence_score = compute_coherence_score(
-        ldamodel, doc_term_matrix, dictionary, model_tokens
-    )
+    # # Vi beregner "coherence score" for modellen
+    # coherence_score = compute_coherence_score(
+    #     ldamodel, doc_term_matrix, dictionary, model_tokens
+    # )
+
+    # Vi beregner "perplexity score" for modellen
+    if calc_score:
+        perplexity_score = compute_perplexity_score(ldamodel, doc_term_matrix)
+    else:
+        perplexity_score = None
 
     # Her finder vi de automatisk skabte emner
-    topics = ldamodel.show_topics(num_topics=n_topics, formatted=False)
+    topics = ldamodel.show_topics(num_topics=n_topics, num_words=None, formatted=False)
     topics_words = []
     for topic_id, topic_words in topics:
         for word, weight in topic_words:
@@ -152,92 +211,135 @@ def fit_lda_model(
         med_prob = round(100 * auto_topics["Sandsynlighed"].median(), 1)
         print(f"Test af LDA tekstmodel med {n_topics} emner færdig.")
         print(f"Mediansandsynlighed for korrekt klassificering: {med_prob}%.")
-    return coherence_score, auto_topics, topics_words
+    return perplexity_score, auto_topics, topics_words
 
 
 # %% Automatisk test af LDA emnemodeller
 
 print("Automatisk test af LDA emnemodeller er nu i gang...")
 
-# Vi tester modeller med mellem 5 og 20 emner for at finde den mest præcise
-n_topics = np.arange(5, 21)
-median_probability = []
-coherence_score = []
+# Unikke lovforslgassæsoner, som kræver test af modeller
+new_seasons = speech_tokens["Sæson"].unique().tolist()
 
-for tmp_n in tqdm(n_topics, total=len(n_topics)):
-    coh_score, auto_topics, _ = fit_lda_model(
-        speech_tokens, "Token", "UdtalelseId", tmp_n
+# Vi tester kun nye lovforslagssæsoner
+if prev_model_tests is not None and not prev_model_tests.empty:
+    tested_seasons = prev_model_tests["Sæson"].unique().tolist()
+else:
+    tested_seasons = []
+new_seasons = [season for season in new_seasons if season not in tested_seasons]
+n_seasons_test = len(new_seasons)
+
+if n_seasons_test:
+    # Vi tester modeller med mellem 2-5 emner for enhver lovforslagssæson
+    n_topics = np.arange(2, 5)
+    median_probability = []
+    perplexity_score = []
+    seasons_for_df = []
+    topics_for_df = []
+
+    for tmp_season in tqdm(new_seasons, total=n_seasons_test):
+        # Vi afgrænser dataene til den relevante sæson
+        tmp_data = speech_tokens[speech_tokens["Sæson"] == tmp_season].copy()
+        for tmp_topic in n_topics:
+            # Vi tester forskellige antal emner i hver sæson
+            perpl_score, auto_topics, _ = fit_lda_model(
+                tmp_data, "Token", "UdtalelseId", tmp_topic, True
+            )
+            med_prob = auto_topics["Sandsynlighed"].median()
+            median_probability.append(med_prob)
+            perplexity_score.append(perpl_score)
+            seasons_for_df.append(tmp_season)
+            topics_for_df.append(tmp_topic)
+
+    # Vi opsummerer resultaterne af vores tests
+    model_tests = pd.DataFrame(
+        {
+            "Sæson": seasons_for_df,
+            "AntalEmner": topics_for_df,
+            "MedianResultat": median_probability,
+            "PerplexityScore": perplexity_score,
+        }
     )
-    med_prob = auto_topics["Sandsynlighed"].median()
-    median_probability.append(med_prob)
-    coherence_score.append(coh_score)
 
-# Vi opsummerer resultaterne af vores tests
-model_tests = pd.DataFrame(
-    {
-        "AntalEmner": n_topics,
-        "MedianResultat": median_probability,
-        "CoherenceScore": coherence_score,
-    }
-)
-model_tests = model_tests.sort_values("CoherenceScore", ascending=False)
-model_tests = model_tests.reset_index(drop=True)
+    # Vi sammensætter tidligere og nuværende resultater i et datasæt
+    model_tests = pd.concat([prev_model_tests, model_tests])
 
-print("Automatisk test af LDA emnemodeller færdig. Her er resultaterne:")
-print(model_tests.head(len(model_tests)))
+    # Vi sorterer data
+    model_tests = model_tests.sort_values(["Sæson", "PerplexityScore"])
+    model_tests = model_tests.reset_index(drop=True)
+    print("Automatisk test af LDA emnemodeller færdig.")
+
+else:
+    model_tests = prev_model_tests
+    print("Obs: Springer over pga. mangel af nye input data.")
 
 
-# %% Gruppering af udtalelser i diverse temaer
+# %% Gruppering af udtalelser i diverse emner
 
-"""
-=================
-Kiril's comments:
-=================
-Use a package that supports Danish-language tests to assign all
-speeches into somewhere between 10-20 themes. Vary the number of
-themes and their parameters until you get the highest mean
-probability that each speech has been assigned to the correct
-category. Then, get the 3-4 speeches within each team that have
-the highest probability, read them and create some human-friendly
-names for the topics.
-"""
+print("Gruppering af udtalelser i diverse emner er nu i gang...")
 
-# Vi vælger den bedste model og bruger den til at gruppere udtalelserne i emner
-best_model_n = model_tests["AntalEmner"].iloc[0]
-coh_score, auto_topics, auto_words = fit_lda_model(
-    speech_tokens, "Token", "UdtalelseId", best_model_n
-)
+# Unikke lovforslgassæsoner, som kræver gruppering i emner
+new_seasons = speech_tokens["Sæson"].unique().tolist()
 
-# For hvert emne finder vi de 5 udtalelser med højest præcision
-best_fitting = auto_topics.copy()
-best_fitting = best_fitting.sort_values(
-    by=["Emne", "Sandsynlighed"], ascending=[True, False]
-)
-best_fitting["ScoreRank"] = best_fitting.groupby("Emne").cumcount() + 1
-best_fitting = best_fitting[best_fitting["ScoreRank"] <= 5].copy()
-best_fitting = pd.merge(
-    best_fitting,
-    all_debates[["UdtalelseId", "Udtalelse"]],
-    how="left",
-    on="UdtalelseId",
-)
-# best_fitting.to_excel("output/best_fitting.xlsx", index=False)
+# Vi grupperer emner kun for nye lovforslagssæsoner
+if prev_auto_topics is not None and not prev_auto_topics.empty:
+    tested_seasons = prev_auto_topics["Sæson"].unique().tolist()
+else:
+    tested_seasons = []
+new_seasons = [season for season in new_seasons if season not in tested_seasons]
+n_seasons_group = len(new_seasons)
 
-# Vi tilføjer vores "menneskevenlige" navne for de enkelte emner
-auto_topics = pd.merge(auto_topics, mapping_topics, how="left", on="EmneNr")
+if n_seasons_group:
+    # Her vi vil opbevare resultaterne af emnegrupperingen
+    auto_topics_df = []
+    auto_words_df = []
 
-print("Gruppering af udtalelser i diverse temaer færdig.")
+    for tmp_season in tqdm(new_seasons, total=n_seasons_group):
+        # Vi afgrænser dataene til den relevante sæson
+        tmp_data = speech_tokens[speech_tokens["Sæson"] == tmp_season].copy()
+        tmp_models = model_tests[model_tests["Sæson"] == tmp_season].copy()
+
+        # Vi vælger den bedste model og bruger den til at gruppere udtalelserne i emner
+        best_model_n = tmp_models["AntalEmner"].iloc[0]
+        _, auto_topics, auto_words = fit_lda_model(
+            tmp_data, "Token", "UdtalelseId", best_model_n
+        )
+        auto_topics["Sæson"] = tmp_season
+        auto_words["Sæson"] = tmp_season
+        auto_topics_df.append(auto_topics)
+        auto_words_df.append(auto_words)
+
+    # Konverterer output til df format
+    auto_topics = pd.concat(auto_topics_df)
+    auto_words = pd.concat(auto_words_df)
+
+    # Vi sammensætter tidligere og nuværende resultater i et datasæt
+    auto_topics = pd.concat([prev_auto_topics, auto_topics])
+    auto_words = pd.concat([prev_auto_words, auto_words])
+
+    # Vi sorterer data
+    auto_topics = auto_topics.sort_values("UdtalelseId")
+    auto_topics = auto_topics.reset_index(drop=True)
+    auto_words = auto_words.sort_values(
+        by=["Sæson", "EmneId", "Vægt"], ascending=[True, True, False]
+    )
+    auto_words = auto_words.reset_index(drop=True)
+
+    print("Gruppering af udtalelser i diverse emner færdig.")
+
+else:
+    print("Obs: Springer over pga. mangel af nye input data.")
 
 
 # %% Manuelle tjek for, at visse ord bliver nævnt
 
 """
-Her unersøger vi blot om nogle specifikke ord bliver nævnt ifm. hver
+Her undersøger vi blot om nogle specifikke ord bliver nævnt ifm. hver
 eneste udtalelse. Det er fx referencer til kriminalitet, udlændingenes
 bidrag til/integration i det danske samfund osv.
 """
 
-manual_topics = speech_tokens.copy()
+print("Udfører manuelle tjek for, at visse ord bliver nævnt...")
 
 # Emner, vi gerne vil tjekke dataene for
 topics_to_check = {
@@ -251,29 +353,51 @@ topics_to_check = {
     "Værn": "værne|beskytte|bevare",
 }
 
-# Tjek for, om ovennævnte ord nævnes i de individuelle udtalelser
-for var_name, var_val in zip(topics_to_check.keys(), topics_to_check.values()):
-    manual_topics[var_name] = manual_topics["Token"].str.contains(var_val)
+# Unikke lovforslgassæsoner, som kræver optælling af visse ord
+new_seasons = speech_tokens["Sæson"].unique().tolist()
 
-# Vi konverterer datane fra "bredt" til "langt" format
-manual_topics = pd.melt(
-    manual_topics,
-    id_vars="UdtalelseId",
-    value_vars=manual_topics.columns[2:],
-    value_name="ReferererTilEmne",
-    var_name="Emne",
-)
-manual_topics["ReferererTilEmne"] = manual_topics["ReferererTilEmne"].astype(int)
+# Vi grupperer emner kun for nye lovforslagssæsoner
+if prev_manual_topics is not None and not prev_manual_topics.empty:
+    tested_seasons = prev_manual_topics["Sæson"].unique().tolist()
+else:
+    tested_seasons = []
+new_seasons = [season for season in new_seasons if season not in tested_seasons]
+n_seasons_count = len(new_seasons)
 
-print("Manuelle tjek for, at visse ord bliver nævnt færdig.")
+if n_seasons_count:
+    # Tjek for, om ovennævnte ord nævnes i de individuelle udtalelser
+    manual_topics = speech_tokens.copy()
+    for var_name, var_val in zip(topics_to_check.keys(), topics_to_check.values()):
+        manual_topics[var_name] = manual_topics["Token"].str.contains(var_val)
+
+    # Vi konverterer datane fra "bredt" til "langt" format
+    manual_topics = pd.melt(
+        manual_topics,
+        id_vars=["Sæson", "UdtalelseId"],
+        value_vars=manual_topics.columns[2:],
+        value_name="ReferererTilEmne",
+        var_name="Emne",
+    )
+    manual_topics["ReferererTilEmne"] = manual_topics["ReferererTilEmne"].astype(int)
+
+    print("Manuelle tjek for, at visse ord bliver nævnt, er færdig.")
+
+else:
+    print("Obs: Springer over pga. mangel af nye input data.")
 
 
 # %% Eksport af de færdige analyser
 
-auto_topics.to_parquet("output/results_topics_auto.parquet")
-model_tests.to_parquet("output/results_topics_model_stats.parquet")
-manual_topics.to_parquet("output/results_topics_manual.parquet")
-print("Resultater fra tekstanalyse er eksporteret til 'output data' mappen.")
+# Vi eksporterer datasæt med outputs kun hvis der er nye data
+if n_seasons_test:
+    model_tests.to_parquet("output/results_topics_model_stats.parquet")
+if n_seasons_group:
+    auto_topics.to_parquet("output/results_topics_auto.parquet")
+    auto_words.to_parquet("output/results_words_auto.parquet")
+if n_seasons_count:
+    manual_topics.to_parquet("output/results_topics_manual.parquet")
+
+print("Resultater fra tekstanalyse findes i 'output data' mappen.")
 print("FÆRDIG.")
 
 # %%
