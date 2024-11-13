@@ -4,7 +4,7 @@ Tekstanalyse ved brug af OpenAIs LLM
 ====================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 12-11-2024
+Sidste opdatering: 13-11-2024
 
 I dette skript anvender vi OpenAIs sprogmodel til forskellige slags
 foremål, primært opsummering af lange udtalelser og gruppering af
@@ -16,6 +16,7 @@ og skabe nogle indsigter, som er mere letforståelige end fx LDA.
 # %% Generel opsætning
 
 # Import af relevante pakker
+import os
 import pandas as pd
 from functions_llm import connect_to_openai, get_prompt, query_llm_multiple
 
@@ -34,7 +35,12 @@ auto_topics = pd.read_parquet("output/results_topics_auto.parquet")
 auto_words = pd.read_parquet("output/results_words_auto.parquet")
 
 # Import af tidligere opsummeringer m.fl.
-# WIP as of 11-11-2024
+file_path_speech_summaries = "output/results_llm_opsummering.parquet"
+prev_speech_summaries = (
+    pd.read_parquet(file_path_speech_summaries)
+    if os.path.exists(file_path_speech_summaries)
+    else None
+)
 
 # Forbereder endpoint og headers til Azure OpenAI API
 api_access = "credentials/azure_openai_access.yaml"
@@ -51,67 +57,100 @@ condition_1 = all_debates["PartiGruppe"] == "Folketingets formand"
 condition_2 = all_debates["Rolle"].str.lower().str.contains("formand")
 all_debates["ApolitiskUdtalelse"] = (condition_1) | (condition_2)
 
-# Vi markerer rækker med meget korte udtalelser
-all_debates["LangUdtalelse"] = all_debates["Udtalelse"].str.len() > max_length
+# # Vi markerer rækker med meget korte udtalelser
+# all_debates["LangUdtalelse"] = all_debates["Udtalelse"].str.len() > max_length
 
 # Vi markerer de resterende rækker, som skal bruges ifm. OpenAI modellen
-all_debates["OpsummerUdtalelse"] = (~all_debates["ApolitiskUdtalelse"]) & (
-    all_debates["LangUdtalelse"]
-)
+all_debates["OpsummerUdtalelse"] = ~all_debates["ApolitiskUdtalelse"]
 
 
-# %% Opsummering af alle relevante udtalelser [WIP as of 12-11-2024]
+# %% Opsummering af alle relevante udtalelser [WIP as of 13-11-2024]
 
 """
 Vi opsummerer alle politiske udtalelser, som er længere end en
 sætning. Dvs. at Folketingets formands udtalelser samt meget korte
 udtalelser vil ikke blive forkortet da de allerede er ret korte.
-
-OBS: Test dette med fx 2024-F sæsonen, læs emnene igennem for at se
-om de giver mening, og fortsæt med resten af opgaven bagefter.
 """
 
 print("Opsummering af alle relevante udtalelser er nu i gang...")
 
-# Vi opsummerer kun data, som er nye
-tmp_data = all_debates[all_debates["Sæson"] == "2024-F"].copy()
-to_summarize = tmp_data[tmp_data["OpsummerUdtalelse"]].copy()
-not_to_summarize = tmp_data[~tmp_data["OpsummerUdtalelse"]].copy()
-full_speeches = to_summarize["Udtalelse"].tolist()
-
 # Vi giver modellen følgende instruktioner
 system_prompt = get_prompt("opsummering.txt")
 
-# Vi opsummerer alle relevante udtalelser
-tmp_summary = query_llm_multiple(
-    openai_client, system_prompt, full_speeches, max_rpm=max_rpm
-)
+# # Vi opsummerer kun data, som er nye
+# if prev_speech_summaries is not None and not prev_speech_summaries.empty:
+#     new_speeches = all_debates[
+#         ~all_debates["UdtalelseId"].isin(prev_speech_summaries["UdtalelseId"])
+#     ].copy()
+# else:
+#     new_speeches = all_debates.copy()
+# n_new_speeches = len(new_speeches)
 
-# Vi tilføjer opsummeringerne til datasættet og fjerner andre kolonner
-cols_to_keep = ["UdtalelseId", "Udtalelse", "Opsummering"]
-to_summarize["Opsummering"] = tmp_summary
-to_summarize = to_summarize[cols_to_keep].copy()
-to_summarize["OpsummeretAfModel"] = "GPT-4o-mini"
+# WIP as of 13-11-2024: Testing summarization 1 year at a time
+# Doing things 1 year at a time
+new_speeches = all_debates[all_debates["År"] == 2006].copy()
+n_new_speeches = len(new_speeches)
 
-# Vil tilføjer de oprindelige taler til datasættet
-not_to_summarize["Opsummering"] = not_to_summarize["Udtalelse"]
-not_to_summarize = not_to_summarize[cols_to_keep].copy()
-not_to_summarize["OpsummeretAfModel"] = "Nej"
+if n_new_speeches:
+    # Vi opsummerer kun længere og politiske udtalelser
+    to_summarize = new_speeches[new_speeches["OpsummerUdtalelse"]].copy()
+    not_to_summarize = new_speeches[~new_speeches["OpsummerUdtalelse"]].copy()
+    full_speeches = to_summarize["Udtalelse"].tolist()
+    full_ids = to_summarize["UdtalelseId"].tolist()
 
-# Vi kombinerer både opsummerede og ikke-opsummerede udtalelser
-speech_summaries = pd.concat([to_summarize, not_to_summarize])
-speech_summaries = speech_summaries.sort_values("UdtalelseId")
-speech_summaries = speech_summaries.reset_index(drop=True)
+    # Vi opsummerer alle relevante udtalelser
+    tmp_summary = query_llm_multiple(
+        openai_client, system_prompt, full_speeches, full_ids, max_rpm=max_rpm
+    )
 
-# Eksport af data
-speech_summaries.to_parquet("output/results_llm_opsummering.parquet")
+    # Vi omdøber visser kolonner
+    col_names = {
+        "Id": "UdtalelseId",
+        "Response": "Opsummering",
+        "hate": "SprogbrugHad",
+        "self_harm": "SprogbrugSelvskade",
+        "sexual": "SprogbrugSex",
+        "violence": "SprobgrugVold",
+    }
+    tmp_summary = tmp_summary.rename(columns=col_names)
 
-print("Alle relevante udtalelser er nu opsummeret.")
+    # Vi tilføjer opsummeringerne til datasættet og fjerner andre kolonner
+    tmp_summary["OpsummeretAfModel"] = "GPT-4o-mini"
+
+    # Vil tilføjer de oprindelige taler til datasættet
+    cols_to_keep = ["UdtalelseId", "Opsummering"]
+    not_to_summarize["Opsummering"] = not_to_summarize["Udtalelse"]
+    not_to_summarize = not_to_summarize[cols_to_keep].copy()
+    not_to_summarize["OpsummeretAfModel"] = "Nej"
+
+    # Vi kombinerer både opsummerede og ikke-opsummerede udtalelser
+    speech_summaries = pd.concat([tmp_summary, not_to_summarize])
+    speech_summaries = speech_summaries.sort_values("UdtalelseId")
+    speech_summaries = speech_summaries.reset_index(drop=True)
+
+    # Vi sammensætter tidligere og nuværende resultater i et datasæt
+    speech_summaries = pd.concat([prev_speech_summaries, speech_summaries])
+
+    # Vi sorterer og eksporterer data
+    speech_summaries = speech_summaries.sort_values("UdtalelseId")
+    speech_summaries = speech_summaries.reset_index(drop=True)
+    speech_summaries.to_parquet("output/results_llm_opsummering.parquet")
+
+    print("Automatisk opsummering af udtalelser færdig.")
+
+else:
+    print("Obs: Springer over pga. mangel af nye input data.")
 
 
-# %% LDA emner til menneskesprog [WIP as of 30-10-2024]
+# %% LDA emner til menneskesprog [WIP as of 13-11-2024]
 
 """
+=============================
+KBO kommentar fra 13-11-2024:
+=============================
+Udviklingen i denne del kræver, at vi først fikser det med
+opsummeringen.
+
 OBS: Det vil være godt også at eskludere apolitiske udtalelser
 fra den almindelige tekstanalyse (hvis de ikke allerede er
 eksluderet af den).
@@ -143,5 +182,10 @@ at lave en overskrift.
 #     on="UdtalelseId",
 # )
 
+
+# %% Endelig bekræftelse
+
+print("Resultater fra tekstanalyse findes i 'output data' mappen.")
+print("FÆRDIG.")
 
 # %%

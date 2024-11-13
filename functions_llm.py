@@ -4,7 +4,7 @@ Customs function for extracting features using LLMs
 ===================================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 08-11-2024
+Sidste opdatering: 13-11-2024
 
 In this script, we create several different functions that allow
 us to extract relevant vessel features using OpenAI's LLM model.
@@ -18,7 +18,7 @@ originating from relevant mailboxes.
 import re
 import time
 import pandas as pd
-from openai import AzureOpenAI
+from openai import AzureOpenAI, BadRequestError
 from tqdm import tqdm
 import yaml
 
@@ -92,45 +92,80 @@ def query_llm(
     model_name: str = "gpt-4o-mini",
     temperature: float = 0.7,
     max_tokens: int | None = None,
-) -> list | None:
+) -> tuple | None:
     """
     Queries OpenAI's LLM based on a given system and user prompts.
-    Automatically attaches the relevant bit of actual data to the
-    user-defined prompt. Returns the response stripped from model
-    metadata.
+    Returns the response or details on any content filtering triggered.
 
     Args:
         openai_client (OpenAI): OpenAI client object
-        system_prompt (str): text to use as system prompt, defining
-        the actual question we're asking
-        user_prompt (str): text to use as the "data point"
+        system_prompt (str): text to use as system prompt
+        user_prompt (str): text to use as the user prompt
         model_name (str): name of the OpenAI model to use.
-        Defaults to "gpt-4o-mini".
-        temperature (float, optional): temperature. Pr. definition 0.7.
-        max_tokens (int, optional): max_tokens. Pr. definition None.
-        content_only (bool, optional): om hele outputtet skal leveres
-        eller om kun teksten (indholdet) og antal brugte tokens skal leveres.
-        Pr. definition True (det sidstnævnte).
+        temperature (float, optional): temperature. Defaults to 0.7.
+        max_tokens (int, optional): max_tokens. Defaults to None.
 
     Returns:
-        list|None: list of relevant responses (if found) or None
+        tuple|None: (response, filter_result_df) if successful or filter triggered,
+                    or None if other issues
     """
+    try:
+        # Query the model with provided prompts and parameters
+        completion = openai_client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
 
-    # Querying the LLM and recording its response
-    completion = openai_client.chat.completions.create(
-        model=model_name,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
-    if completion is not None:
-        response = completion.choices[0].message.content
-        return response
-    else:
-        return None
+        # If completion is successful, return the response content
+        if completion:
+            response = completion.choices[0].message.content
+
+            # Alsoxtract content filter details as a df
+            filter_results = completion.prompt_filter_results[0][
+                "content_filter_results"
+            ]
+            filter_results = pd.DataFrame.from_dict(filter_results, orient="index")
+            filter_results = filter_results[["severity"]].copy()
+            filter_results = filter_results.dropna()
+            filter_results = filter_results.T
+
+            return response, filter_results
+
+    except BadRequestError as e:
+        # Handle content filter error specifically
+        error_details = e.response.json()  # This extracts JSON content from the error
+
+        if "content_filter_result" in error_details.get("error", {}).get(
+            "innererror", {}
+        ):
+            # Extract content filter details as a df
+            content_filter_result = error_details["error"]["innererror"][
+                "content_filter_result"
+            ]
+            filter_results = pd.DataFrame.from_dict(
+                content_filter_result, orient="index"
+            )
+            filter_results = filter_results[["severity"]].copy()
+            filter_results = filter_results.dropna()
+            filter_results = filter_results.T
+
+        else:
+            filter_results = pd.DataFrame({"filter_results": [None]})
+
+        # Record custom response in case filtering is triggered
+        custom_response = (
+            "Obs: Indhold kan ikke opsummeres pga. brug af et farligt sprog."
+        )
+
+        return custom_response, filter_results
+
+    # Return None in case of other errors or no completion
+    return None, None
 
 
 # %% Custom function to limit API requests per minute
@@ -140,10 +175,11 @@ def query_llm_multiple(
     openai_client: AzureOpenAI,
     system_prompt: str,
     data_points: list[str],
+    data_ids: list,
     min_len: int = 3,
     max_rpm: int | None = 20,
     **kwargs,
-) -> list:
+) -> pd.DataFrame:
     """
     Iterates the query_llm() function over a list of different
     values, generating and recording responses to the relevant
@@ -156,6 +192,8 @@ def query_llm_multiple(
         the actual question we're asking
         data_points (list[str]): list of text-based data points to
         iterate over.
+        data_ids (list): unique identifiers to be added to the
+        dataframe summarizing language use
         min_len (int): min length of the string containing the data,
         if the string is considered valid to be processed by an LLM.
         max_rpm (int, optional): max requests per minute for the
@@ -164,7 +202,8 @@ def query_llm_multiple(
         query_llm() function.
 
     Returns:
-        list: all responses
+        pd.DataFrame: all responses stored in a single df with IDs
+        and metadata on the kind of language used in the prompt
     """
 
     # Initializing list as storage and counter for RPM
@@ -173,7 +212,7 @@ def query_llm_multiple(
     start_time = time.time()
 
     print("Generating responses using LLM....")
-    for text_input in tqdm(data_points, total=len(data_points)):
+    for text_input, id in tqdm(zip(data_points, data_ids), total=len(data_points)):
         # Check if there is any relevant text to use
         if not pd.isnull(text_input):
             text_clean = text_input.strip()
@@ -196,16 +235,32 @@ def query_llm_multiple(
                 start_time = time.time()
 
             # Query the LLM and increase the request count
-            response = query_llm(
+            response, lang_use = query_llm(
                 openai_client=openai_client,
                 system_prompt=system_prompt,
                 user_prompt=text_clean,
                 **kwargs,
             )
             request_count += 1
-            all_responses.append(response)
+
+            # Combining the data in a single df
+            combined_response = lang_use
+            combined_response["Id"] = id
+            combined_response["Response"] = response
+            all_responses.append(combined_response)
         else:
-            all_responses.append(None)
+            combined_response = pd.DataFrame({"Id": [id]})
+            combined_response["Response"] = pd.NA
+            all_responses.append(combined_response)
+
+    # Consolidating the df containing the output data
+    all_responses = pd.concat(all_responses)
+    all_responses = all_responses.sort_values("Id")
+    all_responses = all_responses.reset_index(drop=True)
+    all_responses = all_responses.fillna("Unknown")
+    first_cols = ["Id", "Response"]
+    last_cols = [col for col in all_responses.columns if col not in first_cols]
+    all_responses = all_responses[first_cols + last_cols]
 
     print("Generating responses complete.")
     return all_responses
