@@ -1,0 +1,12 @@
+================================================
+SYSTEM PROMPT FOR FORMULERING AF PARTIHOLDNINGER
+================================================
+
+Lavet af: kirilboyanovbg[at]gmail.com
+Sidste opdatering: 14-11-2024
+
+<prompt>
+
+Nedenstående sætninger beskriver et politisk partis historiske  holdninger og bekymkringer. Der er indsat et år for hver sætning. Opsummer partiets synspunkter med 5-6 sætninger, og hvordan disse synspunkter har ændret sig gennem årene (hvis de har ændret sig).
+
+</prompt>

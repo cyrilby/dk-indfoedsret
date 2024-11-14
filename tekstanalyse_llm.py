@@ -150,48 +150,60 @@ if n_new_speeches:
     print("Automatisk opsummering af udtalelser færdig.")
 
 else:
+    speech_summaries = prev_speech_summaries.copy()
     print("Obs: Springer over pga. mangel af nye input data.")
 
 
 # %% LDA emner til menneskesprog [WIP as of 14-11-2024]
 
 """
-=============================
-KBO kommentar fra 14-11-2024:
-=============================
-Udviklingen i denne del kræver, at vi først fikser det med
-opsummeringen.
-
-OBS: Det vil være godt også at eskludere apolitiske udtalelser
-fra den almindelige tekstanalyse (hvis de ikke allerede er
-eksluderet af den).
-
-Der er følgende alternativer, som jeg kan teste:
-1) Udvalg fx de top 25% af alle ord for hvert emne (baseret på
-ordenes vægt), og spørg ChatGPT om at lave en overskrift.
-2) Udvalg fx de top 3/5/10 mest precise udtalelser for hvert
-emne (baseret på "Sandsynlighed" kolonnen), og spørg ChatGPT om
-at lave en overskrift.
+==================
+Kiril, 14-11-2024:
+==================
+Metoden anvendt nedenunder er en proof-of-concept tilgang,
+som muligvis kræver visse justeringer for at få den til at
+virke.
 """
-
 
 # Fx - denne kode er pastet fra det andet tekstanalyse skript
 
-# # For hvert emne finder vi de 5 udtalelser med højest præcision
-# n_samples = 5
-# sort_vars = ["Sæson", "EmneNr", "Sandsynlighed"]
-# sort_vars_asc = [True, True, False]
-# group_vars = ["Sæson", "EmneNr"]
-# best_fitting = auto_topics.copy()
-# best_fitting = best_fitting.sort_values(by=sort_vars, ascending=sort_vars_asc)
-# best_fitting["ScoreRank"] = best_fitting.groupby(group_vars).cumcount() + 1
-# best_fitting = best_fitting[best_fitting["ScoreRank"] <= n_samples].copy()
-# best_fitting = pd.merge(
-#     best_fitting,
-#     all_debates[["UdtalelseId", "Udtalelse"]],
-#     how="left",
-#     on="UdtalelseId",
-# )
+# For hvert emne finder vi de top 20% udtalelser med højest præcision
+pct_for_sampling = 0.2
+sort_vars = ["Sæson", "EmneNr", "Sandsynlighed"]
+sort_vars_asc = [True, True, False]
+group_vars = ["Sæson", "EmneNr"]
+best_fitting = auto_topics.copy()
+best_fitting = best_fitting.sort_values(by=sort_vars, ascending=sort_vars_asc)
+best_fitting["ScoreRank"] = best_fitting.groupby(group_vars).cumcount() + 1
+best_fitting["MaxRank"] = best_fitting.groupby(group_vars)["ScoreRank"].transform("max")
+best_fitting["ScoreRank_Pct"] = best_fitting["ScoreRank"] / best_fitting["MaxRank"]
+
+# Vi beriger dataene med opsummeringen af de enkelte udtalelser
+best_fitting = best_fitting[best_fitting["ScoreRank_Pct"] <= pct_for_sampling].copy()
+best_fitting = pd.merge(
+    best_fitting,
+    speech_summaries[["UdtalelseId", "Opsummering"]],
+    how="left",
+    on="UdtalelseId",
+)
+
+# WIP: Udvid med sikkerhedsfiltre for at undgå triggering af OpenAIs sikkerheds mekanisme
+
+# Vi giver modellen følgende instruktioner
+system_prompt = get_prompt("emnefortolkning.txt")
+
+# Vi tester tilgangen med et emne
+tmp_topic = best_fitting[
+    (best_fitting["Sæson"] == "2004-E") & (best_fitting["EmneNr"] == "Topic 2")
+].copy()
+tmp_topic = tmp_topic["Opsummering"].tolist()
+tmp_topic = " ".join(tmp_topic)
+print(tmp_topic)
+
+results = query_llm_multiple(
+    openai_client, system_prompt, [tmp_topic], ["Topic 0"], max_rpm=max_rpm
+)
+results["Response"].iloc[0]
 
 
 # %% Opsummering af lovforslagsæsoner [WIP as of 14-11-2024]
@@ -199,8 +211,139 @@ at lave en overskrift.
 
 # %% Opsummering af partienes holdninger [WIP as of 14-11-2024]
 
+"""
+==================
+Kiril, 14-11-2024:
+==================
+Metoden anvendt nedenunder er en proof-of-concept tilgang,
+som muligvis kræver visse justeringer for at få den til at
+virke.
+"""
+
+# Vi giver modellen følgende instruktioner
+system_prompt_current = get_prompt("partiholdning_nuværende.txt")
+system_prompt_prev = get_prompt("partiholdning_tidligere.txt")
+
+# Partigruppe, vi bruger som test
+tmp_group = "Alternativet (ALT)"
+all_debates["PartiGruppe"].unique()
+tmp_group_opinion = speech_summaries.copy()
+tmp_group_opinion = pd.merge(
+    tmp_group_opinion,
+    all_debates[["UdtalelseId", "År", "PartiGruppe"]],
+    how="left",
+    on="UdtalelseId",
+)
+tmp_group_opinion = tmp_group_opinion[
+    tmp_group_opinion["PartiGruppe"] == tmp_group
+].copy()
+
+# Nuværende politik/holdninger
+tmp_group_opinion_current = tmp_group_opinion[
+    tmp_group_opinion["År"] == tmp_group_opinion["År"].max()
+].copy()
+tmp_group_opinion_current = tmp_group_opinion_current["Opsummering"].tolist()
+tmp_group_opinion_current = " ".join(tmp_group_opinion_current)
+
+results = query_llm_multiple(
+    openai_client,
+    system_prompt_current,
+    [tmp_group_opinion_current],
+    [tmp_group],
+    max_rpm=max_rpm,
+)
+results["Response"].iloc[0]
+
+
+# Tidligere politik/holdninger
+tmp_group_opinion_prev = tmp_group_opinion[
+    tmp_group_opinion["År"] != tmp_group_opinion["År"].max()
+].copy()
+tmp_group_opinion_prev["OpsummeringMedÅr"] = (
+    tmp_group_opinion_prev["År"].astype(str)
+    + ": "
+    + tmp_group_opinion_prev["Opsummering"]
+)
+tmp_group_opinion_prev = tmp_group_opinion_prev["OpsummeringMedÅr"].tolist()
+tmp_group_opinion_prev = " ".join(tmp_group_opinion_prev)
+
+results = query_llm_multiple(
+    openai_client,
+    system_prompt_prev,
+    [tmp_group_opinion_prev],
+    [tmp_group],
+    max_rpm=max_rpm,
+)
+results["Response"].iloc[0]
+
 
 # %% Opsummering af enkelte folketingsmedlemmers holdninger [WIP as of 14-11-2024]
+
+"""
+==================
+Kiril, 14-11-2024:
+==================
+Metoden anvendt nedenunder er en proof-of-concept tilgang,
+som muligvis kræver visse justeringer for at få den til at
+virke.
+"""
+
+
+# Vi giver modellen følgende instruktioner
+system_prompt_current = get_prompt("personholdning_nuværende.txt")
+system_prompt_prev = get_prompt("personholdning_tidligere.txt")
+
+# Partigruppe, vi bruger som test
+tmp_person = "Mikkel Bjørn (DF)"
+person_name = f" Folketingsmedlemmets navn er {tmp_person}."
+all_debates["Navn"].unique()
+tmp_person_opinion = speech_summaries.copy()
+tmp_person_opinion = pd.merge(
+    tmp_person_opinion,
+    all_debates[["UdtalelseId", "År", "Navn"]],
+    how="left",
+    on="UdtalelseId",
+)
+tmp_person_opinion = tmp_person_opinion[tmp_person_opinion["Navn"] == tmp_person].copy()
+
+# Nuværende politik/holdninger
+tmp_person_opinion_current = tmp_person_opinion[
+    tmp_person_opinion["År"] == tmp_person_opinion["År"].max()
+].copy()
+tmp_person_opinion_current = tmp_person_opinion_current["Opsummering"].tolist()
+tmp_person_opinion_current = " ".join(tmp_person_opinion_current)
+
+results = query_llm_multiple(
+    openai_client,
+    system_prompt_current + person_name,
+    [tmp_person_opinion_current],
+    [tmp_person],
+    max_rpm=max_rpm,
+)
+results["Response"].iloc[0]
+
+
+# Tidligere politik/holdninger
+tmp_person_opinion_prev = tmp_person_opinion[
+    tmp_person_opinion["År"] != tmp_person_opinion["År"].max()
+].copy()
+tmp_person_opinion_prev["OpsummeringMedÅr"] = (
+    tmp_person_opinion_prev["År"].astype(str)
+    + ": "
+    + tmp_person_opinion_prev["Opsummering"]
+)
+tmp_person_opinion_prev = tmp_person_opinion_prev["OpsummeringMedÅr"].tolist()
+tmp_person_opinion_prev = " ".join(tmp_person_opinion_prev)
+
+results = query_llm_multiple(
+    openai_client,
+    system_prompt_prev + person_name,
+    [tmp_person_opinion_prev],
+    [tmp_person],
+    max_rpm=max_rpm,
+)
+results["Response"].iloc[0]
+
 
 """
 ==================

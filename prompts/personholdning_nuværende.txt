@@ -1,0 +1,12 @@
+=================================================
+SYSTEM PROMPT FOR FORMULERING AF PERSONHOLDNINGER
+=================================================
+
+Lavet af: kirilboyanovbg[at]gmail.com
+Sidste opdatering: 14-11-2024
+
+<prompt>
+
+Nedenstående sætninger beskriver et folketingsmedlems nuværende holdninger og bekymkringer. Opsummer vedkommendes synspunkter med 3-4 sætninger.
+
+</prompt>

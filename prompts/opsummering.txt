@@ -1,0 +1,12 @@
+===========================================
+SYSTEM PROMPT FOR OPSUMMERING AF UDTALELSER
+=====================
+
+Lavet af: kirilboyanovbg[at]gmail.com
+Sidste opdatering: 14-11-2024
+
+<prompt>
+
+Opsummer nedenstående tekst med 1-2 sætninger (gerne 1), uden at skrive 'Talen handler om' eller lignende, og uden at udelade vigtige synspunkter.
+
+</prompt>
