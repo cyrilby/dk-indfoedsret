@@ -4,7 +4,7 @@ Tekstanalyse ved brug af OpenAIs LLM
 ====================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 13-11-2024
+Sidste opdatering: 14-11-2024
 
 I dette skript anvender vi OpenAIs sprogmodel til forskellige slags
 foremål, primært opsummering af lange udtalelser og gruppering af
@@ -18,6 +18,7 @@ og skabe nogle indsigter, som er mere letforståelige end fx LDA.
 # Import af relevante pakker
 import os
 import pandas as pd
+import numpy as np
 from functions_llm import connect_to_openai, get_prompt, query_llm_multiple
 
 # Maks antal requests pr. minut for Azure OpenAI API
@@ -57,14 +58,11 @@ condition_1 = all_debates["PartiGruppe"] == "Folketingets formand"
 condition_2 = all_debates["Rolle"].str.lower().str.contains("formand")
 all_debates["ApolitiskUdtalelse"] = (condition_1) | (condition_2)
 
-# # Vi markerer rækker med meget korte udtalelser
-# all_debates["LangUdtalelse"] = all_debates["Udtalelse"].str.len() > max_length
-
 # Vi markerer de resterende rækker, som skal bruges ifm. OpenAI modellen
 all_debates["OpsummerUdtalelse"] = ~all_debates["ApolitiskUdtalelse"]
 
 
-# %% Opsummering af alle relevante udtalelser [WIP as of 13-11-2024]
+# %% Opsummering af alle relevante udtalelser
 
 """
 Vi opsummerer alle politiske udtalelser, som er længere end en
@@ -77,18 +75,13 @@ print("Opsummering af alle relevante udtalelser er nu i gang...")
 # Vi giver modellen følgende instruktioner
 system_prompt = get_prompt("opsummering.txt")
 
-# # Vi opsummerer kun data, som er nye
-# if prev_speech_summaries is not None and not prev_speech_summaries.empty:
-#     new_speeches = all_debates[
-#         ~all_debates["UdtalelseId"].isin(prev_speech_summaries["UdtalelseId"])
-#     ].copy()
-# else:
-#     new_speeches = all_debates.copy()
-# n_new_speeches = len(new_speeches)
-
-# WIP as of 13-11-2024: Testing summarization 1 year at a time
-# Doing things 1 year at a time
-new_speeches = all_debates[all_debates["År"] == 2006].copy()
+# Vi opsummerer kun data, som er nye
+if prev_speech_summaries is not None and not prev_speech_summaries.empty:
+    new_speeches = all_debates[
+        ~all_debates["UdtalelseId"].isin(prev_speech_summaries["UdtalelseId"])
+    ].copy()
+else:
+    new_speeches = all_debates.copy()
 n_new_speeches = len(new_speeches)
 
 if n_new_speeches:
@@ -110,7 +103,7 @@ if n_new_speeches:
         "hate": "SprogbrugHad",
         "self_harm": "SprogbrugSelvskade",
         "sexual": "SprogbrugSex",
-        "violence": "SprobgrugVold",
+        "violence": "SprogbrugVold",
     }
     tmp_summary = tmp_summary.rename(columns=col_names)
 
@@ -131,6 +124,24 @@ if n_new_speeches:
     # Vi sammensætter tidligere og nuværende resultater i et datasæt
     speech_summaries = pd.concat([prev_speech_summaries, speech_summaries])
 
+    # Vi bruger vores egen mapping til "Sprogbrug" kolonnerne
+    lang_mapping = {
+        "safe": 0,
+        "low": 1,
+        "medium": 2,
+        "high": 3,
+        None: np.nan,
+        "Unknown": np.nan,
+    }
+    cols_to_map = [
+        "SprogbrugHad",
+        "SprogbrugSelvskade",
+        "SprogbrugSex",
+        "SprogbrugVold",
+    ]
+    for col in cols_to_map:
+        speech_summaries[col] = speech_summaries[col].map(lang_mapping)
+
     # Vi sorterer og eksporterer data
     speech_summaries = speech_summaries.sort_values("UdtalelseId")
     speech_summaries = speech_summaries.reset_index(drop=True)
@@ -142,11 +153,11 @@ else:
     print("Obs: Springer over pga. mangel af nye input data.")
 
 
-# %% LDA emner til menneskesprog [WIP as of 13-11-2024]
+# %% LDA emner til menneskesprog [WIP as of 14-11-2024]
 
 """
 =============================
-KBO kommentar fra 13-11-2024:
+KBO kommentar fra 14-11-2024:
 =============================
 Udviklingen i denne del kræver, at vi først fikser det med
 opsummeringen.
@@ -182,6 +193,23 @@ at lave en overskrift.
 #     on="UdtalelseId",
 # )
 
+
+# %% Opsummering af lovforslagsæsoner [WIP as of 14-11-2024]
+
+
+# %% Opsummering af partienes holdninger [WIP as of 14-11-2024]
+
+
+# %% Opsummering af enkelte folketingsmedlemmers holdninger [WIP as of 14-11-2024]
+
+"""
+==================
+Kiril, 14-11-2024:
+==================
+Could be useful to get the top 20-40% based on the length of their
+speeches (measured in N of characters) and then only apply it to
+them. Alternatively, apply on all from the most recent years.
+"""
 
 # %% Endelig bekræftelse
 
