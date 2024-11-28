@@ -4,7 +4,7 @@ Tekstanalyse ved brug af OpenAIs LLM
 ====================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 26-11-2024
+Sidste opdatering: 28-11-2024
 
 I dette skript anvender vi OpenAIs sprogmodel til forskellige slags
 foremål, primært opsummering af lange udtalelser og gruppering af
@@ -235,6 +235,9 @@ if n_new_topics:
     topic_auto_names = topic_auto_names.sort_values("Id")
     topic_auto_names = topic_auto_names.reset_index(drop=True)
     topic_auto_names.to_parquet("output/results_llm_lda_topics.parquet")
+    topic_auto_names.to_excel(
+        "output/results_llm_lda_topics.xlsx", index=False
+    )  # til brug for mapping
 
     print("LDA emner er nu omdannet til menneskesprog.")
 
@@ -245,7 +248,7 @@ else:
 # %% Opsummering af lovforslagsæsoner [WIP as of 26-11-2024]
 
 
-# %% Opsummering af partiernes holdninger [WIP as of 26-11-2024]
+# %% Opsummering af partiernes holdninger
 
 """
 OBS: Partiholdninger opsummeres på nyt hver gang brugeren kører
@@ -253,11 +256,11 @@ dette skript, hvis 'summarize_party_opinions = True'. Dette kan
 medføre større omkostninger, og skal kun bruges hvis input dataene
 ændrer sig.
 
-Vi sammensætter alle udtalelser (opsummeringer) fra hvert enkelt
-parti i en tekst, og beder OpenAI modellen om at opsummere partiets
-politik på indfødsretsområdet. Vi skælner imellem nuværende
-holdninger (baseret på de sidste 2 lovforslag, behandlet i FT), og
-tidligere (historiske) holdninger.
+-> Tilgang til nuværende holdning: alle udtalelser fra partiet
+opsummeres i en kort tekst.
+-> Tilgang til historiske holdninger: for hvert parti og sæson, vi
+vælger de top 3 udtalelser (pba. deres længde i antal ord), og
+vi opsummerer kun disse.
 """
 
 if summarize_party_opinions:
@@ -270,15 +273,11 @@ if summarize_party_opinions:
         "Folketingets formand",
     ]
 
-    # # Unikke partier, hvis holdninger skal opsummeres
-    # all_parties = all_debates["PartiGruppe"].sort_values().unique().tolist()
-    # all_parties = [p for p in all_parties if p not in not_parties]
-
     # Vi sætter sammen udtalelsernes opsummeringer med partigrupper
     party_opinions = speech_summaries.copy()
     party_opinions = pd.merge(
         party_opinions,
-        all_debates[["UdtalelseId", "Sæson", "PartiGruppe"]],
+        all_debates[["UdtalelseId", "Sæson", "PartiGruppe", "UdtalelseLængdeOrd"]],
         how="left",
         on="UdtalelseId",
     )
@@ -302,6 +301,43 @@ if summarize_party_opinions:
         party_opinions["Sæson"].isin(current_periods),
         ", ".join(current_periods),
         "Alle andre",
+    )
+
+    # Når det kommer til historiske data, vi udvælger de 3 længste
+    # taler for hvert parti og sæson, og vi kigger kun på de sidste 10 år.
+    # På denne måde får vi de mest relevante data, mens vi reducerer
+    # forbruget af OpenAI tokens og undgår API fejl og begrænsninger.
+    party_opinions = party_opinions.sort_values(
+        by=["PartiGruppe", "Sæson", "UdtalelseLængdeOrd"], ascending=[True, True, False]
+    )
+    party_opinions = party_opinions.reset_index(drop=True)
+    party_opinions["UdtalelseNr"] = (
+        party_opinions.groupby(["PartiGruppe", "Sæson"]).cumcount() + 1
+    )
+    party_opinions["År"] = party_opinions["Sæson"].str.slice(0, 4).astype(int)
+    latest_year = np.max(party_opinions["År"])
+    relevant_years = np.arange(latest_year - 10, latest_year + 1)
+    party_opinions["RækkenSkalOpsummeres"] = np.where(
+        (party_opinions["HoldningType"] == "Historisk holdning")
+        & (party_opinions["UdtalelseNr"] > 3),
+        False,
+        True,
+    )
+    party_opinions["RækkenSkalOpsummeres"] = np.where(
+        party_opinions["År"].isin(relevant_years),
+        party_opinions["RækkenSkalOpsummeres"],
+        False,
+    )
+    party_opinions = party_opinions[party_opinions["RækkenSkalOpsummeres"]].copy()
+
+    # For historiske holdninger, vi tilføjer årene til teksten
+    party_opinions["Opsummering"] = np.where(
+        party_opinions["HoldningType"] == "Historisk holdning",
+        "[År: "
+        + party_opinions["År"].astype(str)
+        + " ]: "
+        + party_opinions["Opsummering"],
+        party_opinions["Opsummering"],
     )
 
     # Vi forbereder dataene til brug i modellen
@@ -342,28 +378,19 @@ if summarize_party_opinions:
     full_texts = tmp_past["Opsummering"].tolist()
     full_ids = tmp_past["Id"].tolist()
     party_opinion_past = query_llm_multiple(
-        openai_client, system_prompt_current, full_texts, full_ids, max_rpm=max_rpm
+        openai_client, system_prompt_past, full_texts, full_ids, max_rpm=max_rpm
     )
 
-    # Vi sammensætter dataene og renser dem lidt [WIP as of 26-11-2024]
+    # Vi sammensætter dataene og renser dem lidt
     cols_to_rename = {"Response": "Holdning"}
     cols_to_keep = ["PartiGruppe", "HoldningType", "Sæsoner", "Holdning"]
-    # party_opinions = pd.concat([party_opinion_current, party_opinion_past])
-    party_opinions = party_opinion_current.copy()  # temp as of 26-11-2024
+    party_opinions = pd.concat([party_opinion_current, party_opinion_past])
+    party_opinions = party_opinions.reset_index(drop=True)
     party_opinions["PartiGruppe"] = party_opinions["Id"].str.split("&&&").str[0]
     party_opinions["HoldningType"] = party_opinions["Id"].str.split("&&&").str[1]
     party_opinions["Sæsoner"] = party_opinions["Id"].str.split("&&&").str[2]
     party_opinions = party_opinions.rename(columns=cols_to_rename)
     party_opinions = party_opinions[cols_to_keep]
-
-    """
-    ==================
-    Kiril, 26-11-2024:
-    ==================
-    I'm getting the following error message, which prevents me from
-    completing the work on the historical opinions. I need 24 h
-    before continuing my work...
-    """
 
     # Vi eksporterer dataene til videre brug
     party_opinions.to_parquet("output/results_party_opinions.parquet")
