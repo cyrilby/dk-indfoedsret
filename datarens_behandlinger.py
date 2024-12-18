@@ -4,12 +4,13 @@ Import og rens af data om behnadlinger af lovforslag
 ====================================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 23-09-2024
+Sidste opdatering: 18-12-2024
 
-Formålet ved dette skript er at indlæse data om de folketingsdebatter,
-som finder sted ved 1., 2. og 3. behandling i salen, fra diverse
-HTM(L)-filer, samt strukturere de tekstbaserede data i et format, som
-senere kan bruges til dataanalayse og/eller visualisering.
+Formålet ved dette skript er at indlæse data om de folketings-
+debatter, som finder sted ved 1., 2. og 3. behandling i salen,
+fra diverse HTM(L)-filer, samt strukturere de tekstbaserede data
+i et format, som senere kan bruges til dataanalayse og/eller
+visualisering.
 """
 
 # %% Generel opsætning
@@ -21,6 +22,9 @@ import os
 import re
 from bs4 import BeautifulSoup
 from tqdm import tqdm
+
+# Skal alle HTML filer genindlæses eller skal kun de nye indlæses
+read_all_files = False
 
 # Mappe, som indeholder HTM(L) filerne, der skal indlæses
 import_folder = "input/debatter/"
@@ -34,6 +38,14 @@ import_files = [
 mapping_parties = pd.read_excel(
     "input/mapping_tabeller.xlsx", sheet_name="Partigrupper"
 )
+
+# Allerede rensede data på behandlinger
+all_debates_prev = pd.read_parquet("output/ft_behandlinger.parquet")
+debate_duration_prev = pd.read_parquet("output/ft_debatlængde.parquet")
+
+# Vi tjekker hvilke filer, der tidligere er blevet bearbejdet
+prev_files = all_debates_prev["Kilde"].unique().tolist()
+new_files = [file for file in import_files if file not in prev_files]
 
 
 # %% Egen funtion, som importerer en lokal HTML fil og omdanner den til BS4 objekt
@@ -283,6 +295,11 @@ def count_words(text: str) -> int:
 # %% Import og rens af data
 
 print("Import og rens af data er nu i gang...")
+
+# Vi indlæser enten alle eller kun de nye HTML filer
+if not read_all_files:
+    import_files = new_files
+
 print(f"Bemærk: {len(import_files)} fil(er) med debatsdata vil blive indlæst.")
 
 # Import af alle filers indhold
@@ -427,6 +444,13 @@ print("Beregning af udtalelselængde færdig.")
 
 
 # %% Eksport af de rensede data
+
+# Hvis vi kun har indlæst nye HTML filer, så skal vi sikre, at
+# de datasæt, der eksporteres, også indeholder data fra de ældre
+# HTML filer
+if not read_all_files:
+    all_debates = pd.concat([all_debates_prev, all_debates])
+    debate_duration = pd.concat([debate_duration_prev, debate_duration])
 
 all_debates.to_parquet("output/ft_behandlinger.parquet")
 debate_duration.to_parquet("output/ft_debatlængde.parquet")
