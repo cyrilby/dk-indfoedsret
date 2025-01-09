@@ -4,11 +4,18 @@ Import og rens af befolkningsdata
 =================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 11-09-2024
+Sidste opdatering: 09-01-2025
 
 Formålet ved dette skript er at indlæse diverse befolkningsdata hentet
 fra Danmarks Statistik (DST) og gøre dem klar til brug for visualisering
 og/eller dataanalyse.
+
+=====================================
+NÆSTE OPDATERING AF DATAENE I KILDEN:
+=====================================
+DKSTAT: Opdateres næste gang: 12-02-2025 08:00 med perioden 2024
+FOLK2: Opdateres næste gang: 12-02-2025 08:00 med perioden 2025
+VAN66: Opdateres næste gang: 19-02-2025 08:00 med perioden 2024
 """
 
 # %% Generel opsætning
@@ -84,15 +91,15 @@ def check_missing(input_df: pd.DataFrame, df_name: str, pct_digits: int = 1) -> 
         print(f"'{col}': {pct_missing}% manglende værdier.")
 
 
-# %% Rens af generelle befolkningstal (FOLK02)
+# %% Rens af generelle befolkningstal (FOLK2)
 
-table_name = "FOLK02"
+table_name = "FOLK2"
 print(f"Import og rens af data fra '{table_name}' tabellen er nu i gang...\n")
 
 # Vi indlæser data og omdøber de første X kolonner
 id_cols = ["Statsborgerskab", "Herkomst", "Herkomstland"]
 general_population = read_dst_data(
-    "input/dst/FOLK02.xlsx", id_cols, True, "AntalMennesker"
+    "input/dst/FOLK2.xlsx", id_cols, True, "AntalMennesker"
 )
 
 # Vi tjekker for mangler i data
