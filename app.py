@@ -43,6 +43,9 @@ run_script("datarens_behandlinger.py")
 # Data på enedelige afstemninger af lovforslagene
 run_script("datarens_afstemninger.py")
 
+# Identificering og bekræftelse af partihoppere
+run_script("datarens_partihoppere.py")
+
 # Befolkningsdata m.fl. fra Danmarks Statistik
 run_script("datarens_befolkning.py")
 

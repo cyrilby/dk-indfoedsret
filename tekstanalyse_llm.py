@@ -4,7 +4,7 @@ Tekstanalyse ved brug af OpenAIs LLM
 ====================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 28-11-2024
+Sidste opdatering: 09-01-2025
 
 I dette skript anvender vi OpenAIs sprogmodel til forskellige slags
 foremål, primært opsummering af lange udtalelser og gruppering af
@@ -21,11 +21,14 @@ import pandas as pd
 import numpy as np
 from functions_llm import connect_to_openai, get_prompt, query_llm_multiple
 
+# Fjern advarsler, når .ffill() eller .bfill() anvendes
+pd.set_option("future.no_silent_downcasting", True)
+
 # Om visse dele af analysen skal opsummeres
 # (Gælder kun i tilfælde, hvor ny data ikke trackes automatisk)
 # OBS: Sat til "True" hvis vi har nye input data
 summarize_party_opinions = False
-summarize_personal_opinions = False
+summarize_personal_opinions = True
 
 # Maks antal requests pr. minut for Azure OpenAI API
 max_rpm = None  # or 20
@@ -36,6 +39,7 @@ max_length = 160
 # Import af renset input data
 all_debates = pd.read_parquet("output/ft_behandlinger.parquet")
 speech_tokens = pd.read_parquet("output/results_speech_tokens.parquet")
+latest_parties = pd.read_parquet("output/ft_seneste_partigruppe.parquet")
 
 # Import af resultater fra den klassiske tekstanalyse
 auto_topics = pd.read_parquet("output/results_topics_auto.parquet")
@@ -245,9 +249,6 @@ else:
     print("Obs: Springer over pga. mangel af nye input data.")
 
 
-# %% Opsummering af lovforslagsæsoner [WIP as of 26-11-2024]
-
-
 # %% Opsummering af partiernes holdninger
 
 """
@@ -365,7 +366,7 @@ if summarize_party_opinions:
 
     # Vi giver modellen følgende instruktioner
     system_prompt_current = get_prompt("partiholdning_nuværende.txt")
-    system_prompt_past = get_prompt("partiholdning_tidligere.txt")
+    system_prompt_prev = get_prompt("partiholdning_tidligere.txt")
 
     # Vi opsummerer partiernes nuværende holdninger
     full_texts = tmp_current["Opsummering"].tolist()
@@ -378,7 +379,7 @@ if summarize_party_opinions:
     full_texts = tmp_past["Opsummering"].tolist()
     full_ids = tmp_past["Id"].tolist()
     party_opinion_past = query_llm_multiple(
-        openai_client, system_prompt_past, full_texts, full_ids, max_rpm=max_rpm
+        openai_client, system_prompt_prev, full_texts, full_ids, max_rpm=max_rpm
     )
 
     # Vi sammensætter dataene og renser dem lidt
@@ -401,91 +402,198 @@ else:
     print("Obs: Springer over pga. mangel af nye input data.")
 
 
-# %% Opsummering af enkelte folketingsmedlemmers holdninger [WIP as of 26-11-2024]
+# %% Opsummering af enkelte folketingsmedlemmers holdninger
 
 """
-==================
-Kiril, 14-11-2024:
-==================
-Metoden anvendt nedenunder er en proof-of-concept tilgang,
-som muligvis kræver visse justeringer for at få den til at
-virke.
-
-Kiril, 26-11-2024: Need to create a sorted list of FT medlemmer
-for at finde ud af, om der har været nogle partihoppere. De skal
-have deres nuværende (sidste) parti i navnet. Lav en df med navne,
-og gennemgå den manuelt inden du fortsætter med at kode i denne del.
+Metoden anvendt nedenunder er den samme som i den forrige
+sektion, med den forskel, at vi kigger på individuelle
+holdninger her, og at vi også tager potentielle partihoppere
+i betragtning for at undgå dobbel optælling af samme person.
 """
 
 
-# Vi giver modellen følgende instruktioner
-system_prompt_current = get_prompt("personholdning_nuværende.txt")
-system_prompt_prev = get_prompt("personholdning_tidligere.txt")
+if summarize_personal_opinions:
+    print("Opsummering af folketingsmedlemmernes holdninger er nu i gang...")
+    # Først tilpasser vi dataene vedr. seneste partigrupper
+    cols_to_keep = ["Sæson", "Navn", "NuværendePartiGruppe", "SenestePartiGruppe"]
+    new_col_names = {"PartiGruppe": "NuværendePartiGruppe"}
+    latest_parties["Navn"] = (
+        latest_parties["Navn"] + " (" + latest_parties["PartiGruppeKort"] + ")"
+    )
+    latest_parties["Sæson"] = (
+        latest_parties["År"].astype(str) + "-" + latest_parties["Sæson"].str.slice(0, 1)
+    )
 
-# Partigruppe, vi bruger som test
-tmp_person = "Mikkel Bjørn (DF)"
-person_name = f" Folketingsmedlemmets navn er {tmp_person}."
-all_debates["Navn"].unique()
-tmp_person_opinion = speech_summaries.copy()
-tmp_person_opinion = pd.merge(
-    tmp_person_opinion,
-    all_debates[["UdtalelseId", "År", "Navn"]],
-    how="left",
-    on="UdtalelseId",
-)
-tmp_person_opinion = tmp_person_opinion[tmp_person_opinion["Navn"] == tmp_person].copy()
+    latest_parties = latest_parties.rename(columns=new_col_names)
+    latest_parties = latest_parties[cols_to_keep]
 
-# Nuværende politik/holdninger
-tmp_person_opinion_current = tmp_person_opinion[
-    tmp_person_opinion["År"] == tmp_person_opinion["År"].max()
-].copy()
-tmp_person_opinion_current = tmp_person_opinion_current["Opsummering"].tolist()
-tmp_person_opinion_current = " ".join(tmp_person_opinion_current)
+    # Derefter kobler vi dem til dataene vedr. behandlingerne
+    cols_for_merge = ["Sæson", "Navn"]
+    all_debates = pd.merge(all_debates, latest_parties, how="left", on=cols_for_merge)
 
-results = query_llm_multiple(
-    openai_client,
-    system_prompt_current + person_name,
-    [tmp_person_opinion_current],
-    [tmp_person],
-    max_rpm=max_rpm,
-)
-results["Response"].iloc[0]
+    # Vi sikrer, at personnavnet ikke indeholder partiet
+    all_debates["PersonNavn"] = all_debates["Navn"].str.extract(r"^(.*?)\s\(")
+    all_debates["PersonNavn"] = all_debates["PersonNavn"].fillna(all_debates["Navn"])
 
+    # Vi sikrer, at ingen politiske udtalelser mangler seneste parti
+    all_debates["SenestePartiGruppe"] = all_debates.groupby("PersonNavn")[
+        "SenestePartiGruppe"
+    ].transform(lambda x: x.ffill().bfill())
 
-# Tidligere politik/holdninger
-tmp_person_opinion_prev = tmp_person_opinion[
-    tmp_person_opinion["År"] != tmp_person_opinion["År"].max()
-].copy()
-tmp_person_opinion_prev["OpsummeringMedÅr"] = (
-    tmp_person_opinion_prev["År"].astype(str)
-    + ": "
-    + tmp_person_opinion_prev["Opsummering"]
-)
-tmp_person_opinion_prev = tmp_person_opinion_prev["OpsummeringMedÅr"].tolist()
-tmp_person_opinion_prev = " ".join(tmp_person_opinion_prev)
+    # Vi giver modellen følgende instruktioner
+    system_prompt_current = get_prompt("personholdning_nuværende.txt")
+    system_prompt_prev = get_prompt("personholdning_tidligere.txt")
 
-results = query_llm_multiple(
-    openai_client,
-    system_prompt_prev + person_name,
-    [tmp_person_opinion_prev],
-    [tmp_person],
-    max_rpm=max_rpm,
-)
-results["Response"].iloc[0]
+    # Vi looper over alle unikke taler udover Folketingets formands
+    # og udlændingeministerens udtalelser
+    political_speech = ~all_debates["ApolitiskUdtalelse"]
+    personal_opinions = all_debates[political_speech].copy()
+    unique_speakers = personal_opinions["PersonNavn"].unique()
+    n_unique_speakers = len(unique_speakers)
 
+    # Vi betragter de sidste 2 sæsoner som "nuværende politik"
+    all_debates["Dato"] = all_debates["Tid"].dt.date
+    all_periods = all_debates[["Dato", "Sæson"]].sort_values(by="Dato")
+    all_periods = all_periods.drop_duplicates("Sæson")
+    all_periods = all_periods["Sæson"].tolist()
+    current_periods = all_periods[-2:]
+    past_periods = all_periods[:-2]
+    personal_opinions["HoldningType"] = np.where(
+        personal_opinions["Sæson"].isin(current_periods),
+        "Nuværende holdning",
+        "Historisk holdning",
+    )
+    personal_opinions["Sæsoner"] = np.where(
+        personal_opinions["Sæson"].isin(current_periods),
+        ", ".join(current_periods),
+        "Alle andre",
+    )
 
-"""
-==================
-Kiril, 14-11-2024:
-==================
-Could be useful to get the top 20-40% based on the length of their
-speeches (measured in N of characters) and then only apply it to
-them. Alternatively, apply on all from the most recent years.
-"""
+    # Vi tilføjer udtalelsernes opsummeringer til dataene
+    personal_opinions = pd.merge(
+        personal_opinions, speech_summaries, how="left", on="UdtalelseId"
+    )
+
+    # Når det kommer til historiske data, vi udvælger de 3 længste
+    # taler for hver person og sæson, og vi kigger kun på de sidste 10 år.
+    # På denne måde får vi de mest relevante data, mens vi reducerer
+    # forbruget af OpenAI tokens og undgår API fejl og begrænsninger.
+    personal_opinions = personal_opinions.sort_values(
+        by=["PersonNavn", "Sæson", "UdtalelseLængdeOrd"], ascending=[True, True, False]
+    )
+    personal_opinions = personal_opinions.reset_index(drop=True)
+    personal_opinions["UdtalelseNr"] = (
+        personal_opinions.groupby(["PersonNavn", "Sæson"]).cumcount() + 1
+    )
+    personal_opinions["År"] = personal_opinions["Sæson"].str.slice(0, 4).astype(int)
+    latest_year = np.max(personal_opinions["År"])
+    relevant_years = np.arange(latest_year - 10, latest_year + 1)
+    personal_opinions["RækkenSkalOpsummeres"] = np.where(
+        (personal_opinions["HoldningType"] == "Historisk holdning")
+        & (personal_opinions["UdtalelseNr"] > 3),
+        False,
+        True,
+    )
+    personal_opinions["RækkenSkalOpsummeres"] = np.where(
+        personal_opinions["År"].isin(relevant_years),
+        personal_opinions["RækkenSkalOpsummeres"],
+        False,
+    )
+    personal_opinions = personal_opinions[
+        personal_opinions["RækkenSkalOpsummeres"]
+    ].copy()
+
+    # For historiske holdninger, vi tilføjer årene til teksten
+    personal_opinions["Opsummering"] = np.where(
+        personal_opinions["HoldningType"] == "Historisk holdning",
+        "[År: "
+        + personal_opinions["År"].astype(str)
+        + " ]: "
+        + personal_opinions["Opsummering"],
+        personal_opinions["Opsummering"],
+    )
+
+    # For hver person, vi noterer alle relevante partigrupper
+    parties_for_person = personal_opinions.groupby("PersonNavn")["PartiGruppe"].apply(
+        lambda x: ", ".join(sorted(x.unique()))
+    )
+    personal_opinions = personal_opinions.merge(
+        parties_for_person.rename("AllePartiGrupper"), on="PersonNavn"
+    )
+
+    # Vi laver en kolonne med navn og alle partigrupper
+    personal_opinions["NavnOgPartier"] = (
+        "Folketingsmedlemmet hedder "
+        + personal_opinions["PersonNavn"]
+        + ". Han/hun har senest været medlem af "
+        + personal_opinions["SenestePartiGruppe"]
+        + ". Han/hun har tidligere været (medlem af) "
+        + personal_opinions["AllePartiGrupper"]
+    )
+
+    # Vi forbereder dataene til brug i modellen
+    personal_opinions = personal_opinions.groupby(
+        ["PersonNavn", "NavnOgPartier", "HoldningType", "Sæsoner"], as_index=False
+    ).agg({"Opsummering": lambda x: " ".join(x)})
+    personal_opinions = personal_opinions.drop_duplicates()
+    personal_opinions["Id"] = (
+        personal_opinions["PersonNavn"]
+        + "&&&"
+        + personal_opinions["HoldningType"]
+        + "&&&"
+        + personal_opinions["Sæsoner"]
+    )
+    personal_opinions["Opsummering"] = (
+        "["
+        + personal_opinions["NavnOgPartier"]
+        + "]\n"
+        + personal_opinions["Opsummering"]
+    )
+
+    # Vi skiler historiske og nuværende holdninger af
+    tmp_current = personal_opinions[
+        personal_opinions["HoldningType"] == "Nuværende holdning"
+    ]
+    tmp_past = personal_opinions[
+        personal_opinions["HoldningType"] == "Historisk holdning"
+    ]
+
+    # Vi opsummerer folketingsmedlemmernes nuværende holdninger
+    full_texts = tmp_current["Opsummering"].tolist()
+    full_ids = tmp_current["Id"].tolist()
+    personal_opinion_current = query_llm_multiple(
+        openai_client, system_prompt_current, full_texts, full_ids, max_rpm=max_rpm
+    )
+
+    # Vi opsummerer folketingsmedlemmernes historiske holdninger
+    full_texts = tmp_past["Opsummering"].tolist()
+    full_ids = tmp_past["Id"].tolist()
+    personal_opinion_past = query_llm_multiple(
+        openai_client, system_prompt_prev, full_texts, full_ids, max_rpm=max_rpm
+    )
+
+    # Vi sammensætter dataene og renser dem lidt
+    cols_to_rename = {"Response": "Holdning"}
+    cols_to_keep = ["PersonNavn", "HoldningType", "Sæsoner", "Holdning"]
+    personal_opinions = pd.concat([personal_opinion_current, personal_opinion_past])
+    personal_opinions = personal_opinions.reset_index(drop=True)
+    personal_opinions["PersonNavn"] = personal_opinions["Id"].str.split("&&&").str[0]
+    personal_opinions["HoldningType"] = personal_opinions["Id"].str.split("&&&").str[1]
+    personal_opinions["Sæsoner"] = personal_opinions["Id"].str.split("&&&").str[2]
+    personal_opinions = personal_opinions.rename(columns=cols_to_rename)
+    personal_opinions = personal_opinions[cols_to_keep]
+
+    # Vi eksporterer dataene til videre brug
+    personal_opinions.to_parquet("output/results_personal_opinions.parquet")
+    print("Folketingsmedlemmernes holdninger er nu opsummeret.")
+
+else:
+    print("Obs: Springer over pga. mangel af nye input data.")
+
 
 # %% Endelig bekræftelse
 
-print("Resultater fra tekstanalyse findes i 'output data' mappen.")
+print("Resultaterne fra tekstanalyse findes i 'output data' mappen.")
 print("FÆRDIG.")
 
 # %%

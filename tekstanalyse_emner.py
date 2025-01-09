@@ -4,7 +4,7 @@ Tekstanalyse ved brug af klassiske metoder
 ==========================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 12-11-2024
+Sidste opdatering: 09-01-2025
 
 Formålet ved dette skript er at tage de rensede data fra debatterne,
 som indeholder diverse taler ("udtalelser"), og bruge dem til klassisk
@@ -27,9 +27,6 @@ from typing import Tuple
 all_debates = pd.read_parquet("output/ft_behandlinger.parquet")
 speech_tokens = pd.read_parquet("output/results_speech_tokens.parquet")
 mapping_roller = pd.read_excel("input/mapping_tabeller.xlsx", sheet_name="Partigrupper")
-mapping_topics = pd.read_excel("input/mapping_tabeller.xlsx", sheet_name="Emner")[
-    ["EmneNr", "Emne"]
-]
 
 # Import af modeltest og emner fra tidligere kørsler af skriptet
 file_path_model_tests = "output/results_topics_model_stats.parquet"
