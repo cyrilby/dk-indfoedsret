@@ -4,12 +4,14 @@ Import og rens af data om afstemninger
 ======================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 11-09-2024
+Sidste opdatering: 09-01-2025
 
 Formålet ved dette skript er at indlæse data om folketingsafstemninger
 fra HTM(L)-filer, finde den relevante tabel med de personlige stemmer,
 samt kombinere alle relevante tabeller i et samlet datasæt, som kan
-bruges til dataanalayse og/eller visualisering.
+bruges til dataanalayse og/eller visualisering. Derudover laver vi
+en "hjælpetabel", som indeholder de seneste partigrupper for de
+såkaldte "partihoppere".
 """
 
 # %% Generel opsætning
@@ -55,6 +57,10 @@ final_votes["År"] = final_votes["Kilde"].str.slice(0, 4).astype(int)
 final_votes["Sæson"] = final_votes["Kilde"].str.split("_").str[1].str.title()
 cols_order = ["År", "Sæson", "Navn", "Partigruppe", "Stemme"]
 final_votes = final_votes[cols_order]
+
+new_col_names = {"Partigruppe": "PartiGruppe"}
+final_votes = final_votes.rename(columns=new_col_names)
+
 print(f"Bemærk: {len(final_votes)} rækker af data indsamlet er renset.")
 
 
