@@ -50,7 +50,12 @@ for file in tqdm(files, total=len(files)):
 final_votes = pd.concat(final_votes)
 final_votes = final_votes.sort_values("Kilde")
 final_votes = final_votes.reset_index(drop=True)
-final_votes["Kilde"].value_counts()
+
+# Vi sikrer, at vi ikke har nogle dubletter
+id_cols = ["Kilde", "Navn"]
+final_votes = final_votes.drop_duplicates(subset=id_cols)
+final_votes = final_votes.reset_index(drop=True)
+# final_votes["Kilde"].value_counts()
 
 # Videre rensning
 final_votes["År"] = final_votes["Kilde"].str.slice(0, 4).astype(int)
