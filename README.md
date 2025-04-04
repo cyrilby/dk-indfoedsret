@@ -15,7 +15,7 @@ Formålet ved dette skript er at indlæse diverse befolkningsdata hentet fra Dan
 
 Specifikt bruges der **følgende tabeller** fra www.dst.dk:
 
-* `FOLK02`: indeholder generelle befolkningstal, herunder antal mennesker med bopæl i Danmark fordelt på herkomstland og år
+* `FOLK2`: indeholder generelle befolkningstal, herunder antal mennesker med bopæl i Danmark fordelt på herkomstland og år
 * `DKSTAT`: indeholder antallet af uddelte statsborgerskaber fordelt på herkomstland og år
 * `VAN66`: indeholder antallet af opholdstilladelser fordelt på opholdsgrundlag og år
 
