@@ -1,7 +1,7 @@
 # Indsigter om dansk indfødsret
 
 * Lavet af: kirilboyanovbg[at]gmail.com
-* Sidste mærkbare opdatering: 13-09-2024
+* Sidste store opdatering: 13-09-2024
 
 Dette projekt er igangværende pr. september 2024, og handler om at danne nogle indsigter omkring dansk indfødsret, herunder hvilket sprog, der bliver brugt af de danske politiker, samt at undersøge om de debatter, som holdes i Folketinget, afspejler og/eller påvirker befolkningsstatistikkerne.
 
