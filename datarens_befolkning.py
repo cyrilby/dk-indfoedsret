@@ -4,24 +4,18 @@ Import og rens af befolkningsdata
 =================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 09-01-2025
+Sidste opdatering: 04-04-2025
 
-Formålet ved dette skript er at indlæse diverse befolkningsdata hentet
-fra Danmarks Statistik (DST) og gøre dem klar til brug for visualisering
-og/eller dataanalyse.
-
-=====================================
-NÆSTE OPDATERING AF DATAENE I KILDEN:
-=====================================
-DKSTAT: Opdateres næste gang: 12-02-2025 08:00 med perioden 2024
-FOLK2: Opdateres næste gang: 12-02-2025 08:00 med perioden 2025
-VAN66: Opdateres næste gang: 19-02-2025 08:00 med perioden 2024
+Formålet ved dette skript er at indlæse diverse befolkningsdata
+hentet fra Danmarks Statistik (DST) og gøre dem klar til brug for
+visualisering og/eller dataanalyse.
 """
 
 # %% Generel opsætning
 
 # Import af relevante pakker
 import pandas as pd
+import os
 
 
 # %% Egen funktion til indlæsning af DST data
@@ -143,27 +137,32 @@ print(f"\nTabellen '{table_name}' er nu klar til brug.")
 
 # %% Rens af tal om opholdstilladelser (VAN66)
 
-# Dataene her er adskilt i 2 fordi DST kan kun eksportere op til 100K rækker i 1 fil
+# Data er opdelt i flere filer pga. DSTs begrænsinger på,
+# hvor meget data man må eksportere ad gangen
 table_name = "VAN66"
 print(f"Import og rens af data fra '{table_name}' tabellen er nu i gang...\n")
 
-# Vi importerer data fra den 1. fil
-id_cols = ["Opholdsgrundlag", "Herkomstland"]
-residence_permits_1 = read_dst_data(
-    "input/dst/VAN66 - asyl, familiesammenhøring og øvrige.xlsx",
-    id_cols,
-    True,
-    "AntalMennesker",
-)
+# Vi finder alle relevante filer i mappen
+folder_path = "input/dst/"
+files = [
+    f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))
+]
+van66_files = [f for f in files if "VAN66" in f]
 
-# Vi importerer data fra den 2. fil
+# Vi importerer data en fil ad gangen
 id_cols = ["Opholdsgrundlag", "Herkomstland"]
-residence_permits_2 = read_dst_data(
-    "input/dst/VAN66 - studie, erhverv, EU, EØS.xlsx", id_cols, True, "AntalMennesker"
-)
+residence_permits = []
+for file in van66_files:
+    tmp_permits = read_dst_data(
+        f"input/dst/{file}",
+        id_cols,
+        True,
+        "AntalMennesker",
+    )
+    residence_permits.append(tmp_permits)
 
 # Vi samler alle dataene i et datasæt
-residence_permits = pd.concat([residence_permits_1, residence_permits_2])
+residence_permits = pd.concat(residence_permits)
 
 # Vi tjekker for mangler i data
 check_missing(residence_permits, table_name)
