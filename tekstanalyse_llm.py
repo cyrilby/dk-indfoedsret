@@ -4,7 +4,7 @@ Tekstanalyse ved brug af OpenAIs LLM
 ====================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 09-01-2025
+Sidste opdatering: 08-07-2025
 
 I dette skript anvender vi OpenAIs sprogmodel til forskellige slags
 foremål, primært opsummering af lange udtalelser og gruppering af
@@ -26,8 +26,8 @@ pd.set_option("future.no_silent_downcasting", True)
 
 # Om visse dele af analysen skal opsummeres
 # (Gælder kun i tilfælde, hvor ny data ikke trackes automatisk)
-# OBS: Sat til "True" hvis vi har nye input data
-summarize_party_opinions = False
+# OBS: Sat til "True" hvis vi har nye input data fra Folketinget
+summarize_party_opinions = True
 summarize_personal_opinions = True
 
 # Maks antal requests pr. minut for Azure OpenAI API
@@ -180,7 +180,7 @@ OpenAI modellen til at lave en kort, men deskriptiv overskrift til hver tekst.
 print("Omdannelse af LDA emner til menneskesprog er nu ingang...")
 
 # For hvert emne finder vi de top 20% udtalelser med højest præcision
-pct_for_sampling = 0.2
+pct_for_sampling = 0.20
 sort_vars = ["Sæson", "EmneNr", "Sandsynlighed"]
 sort_vars_asc = [True, True, False]
 group_vars = ["Sæson", "EmneNr"]
@@ -515,7 +515,7 @@ if summarize_personal_opinions:
 
     # For hver person, vi noterer alle relevante partigrupper
     parties_for_person = personal_opinions.groupby("PersonNavn")["PartiGruppe"].apply(
-        lambda x: ", ".join(sorted(x.unique()))
+        lambda x: ", ".join(sorted(x.dropna().unique()))
     )
     personal_opinions = personal_opinions.merge(
         parties_for_person.rename("AllePartiGrupper"), on="PersonNavn"

@@ -4,7 +4,7 @@ Håndtering af partihoppere
 ==========================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 09-01-2025
+Sidste opdatering: 08-07-2025
 
 Formålet ved dette skript er at lave  en "hjælpetabel", som indeholder
 de seneste partigrupper for de såkaldte "partihoppere". Dette vil gøre
@@ -112,7 +112,7 @@ n_hoppers = len(uncomfirmed_hopppers["Navn"].unique())
 if n_hoppers:
     print(f"OBS: {n_hoppers} ubekfæftede partihoppere er identificeret.")
     print("Tjek 'output/ft_partihoppere.xlsx' og opdater mapping tabel.")
-    party_hoppers.to_excel("output/ft_partihoppere.xlsx", index=False)
+    uncomfirmed_hopppers.to_excel("output/ft_partihoppere.xlsx", index=False)
 else:
     print("Ingen ubekfræftede partihoppere er blevet fundet.")
 
