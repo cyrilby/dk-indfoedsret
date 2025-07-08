@@ -3,10 +3,10 @@ SYSTEM PROMPT FOR FORTOLKNING AF EMNER
 ======================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 14-11-2024
+Sidste opdatering: 08-07-2025
 
 <prompt>
 
-Find ud af, hvad nedenstående sætninger har til fælles, og kom med en fælles overskift, som kan bruges som et emne. Overskriften skal ikke være kortere end 5-6 ord. Returner kun overskriften, uden ekstra forklaringer.
+Opsummer venligst følgende tekst i en kort sætning. Fokuser gerne på de fælles emner i teksten, og ikke på forskellene. Returner kun opsummeringen, uden ekstra forklaringer.
 
 </prompt>
