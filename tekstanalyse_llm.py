@@ -31,7 +31,7 @@ summarize_party_opinions = False
 summarize_personal_opinions = False
 
 # Tving LLM-LDA analysen selv om der ikke er nye data
-force_lda = False
+force_lda = True  # WIP as of 24-07-2025
 
 # Maks antal requests pr. minut for Azure OpenAI API
 max_rpm = None  # or 20

@@ -24,6 +24,9 @@ from gensim.models import LdaModel, CoherenceModel
 from tqdm import tqdm
 from typing import Tuple
 
+# Brug dette til at tvinge LDA analysen selv om der ikke er nye data
+force_lda = True  # WIP as of 24-07-2025
+
 # Import af data, som allerede er blevet renset
 all_debates = pd.read_parquet("output/ft_behandlinger.parquet")
 speech_tokens = pd.read_parquet("output/results_speech_tokens.parquet")
@@ -223,9 +226,6 @@ tilgang er det nødvendigt med LLM-assisteret mapping af emnerne
 hver gang, der kommer nye data fra Folketinget (2 gange om året).
 """
 
-# Brug dette til at tvinge LDA analysen selv om der ikke er nye data
-force_lda = False
-
 # Vi noterer den sidste sæson, som er dækket af dataenee
 latest_season = speech_tokens["Sæson"].iloc[-1]
 
@@ -235,8 +235,8 @@ latest_lda_season = prev_auto_topics["SæsonOpdateret"].iloc[0]
 new_data_available = latest_lda_season != latest_season
 
 if new_data_available or force_lda:
-    # Vi tester modeller med mellem 2-15 emner i alt
-    n_topics = np.arange(2, 16)
+    # Vi tester modeller med mellem 2-20 emner i alt
+    n_topics = np.arange(2, 21)
     median_probability = []
     perplexity_score = []
     topics_for_df = []

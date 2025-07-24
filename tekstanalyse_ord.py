@@ -4,13 +4,13 @@ Enkel tekstanalyse af taler under debatterne
 ============================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 01-10-2024
+Sidste opdatering: 24-07-2025
 
 Formålet ved dette skript er at tage de rensede data fra debatterne,
 som indeholder diverse taler ("udtalelser"), og bruge dem til klassisk
-tekstanalyse, herunder beregning af "sentiment score", identificering af
-"n-grams", m.fl. Alt i den her skript foregår lokalt
-uden at bruge eksterne API'er.
+tekstanalyse, herunder beregning af "sentiment score", identificering
+af "n-grams", m.fl. Alt i den her skript foregår lokalt uden at bruge
+eksterne API'er.
 """
 
 # %% Generel opsætning
@@ -29,6 +29,19 @@ all_debates = pd.read_parquet("output/ft_behandlinger.parquet")
 # Import af personaliseret liste med stopwords
 custom_stopwords = pd.read_excel("input/mapping_tabeller.xlsx", sheet_name="Stopwords")
 custom_stopwords = custom_stopwords["Ord"].tolist()
+
+# Liste med navne af folketingsmedlemmer, som også bør betragtes
+# som stopwords idet de ikke fortæller noget med substans
+names = all_debates["Navn"].tolist()
+names = [x.replace("(", "") for x in names]
+names = [x.replace(")", "") for x in names]
+names = [x.replace("-", "") for x in names]
+names = [x.lower() for x in names]
+names_stopwords = [word for name in names for word in name.split()]
+names_stopwords = list(set(names_stopwords))
+custom_stopwords = custom_stopwords + names_stopwords
+n_stop = len(custom_stopwords)
+print(f"Obs: {n_stop} ord vil blive anvendt som 'stopwords' i analysen.")
 
 
 # %% Egen funktion til beregning af sentiment score
