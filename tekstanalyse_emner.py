@@ -4,12 +4,13 @@ Tekstanalyse ved brug af klassiske metoder
 ==========================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 09-01-2025
+Sidste opdatering: 24-07-2025
 
 Formålet ved dette skript er at tage de rensede data fra debatterne,
 som indeholder diverse taler ("udtalelser"), og bruge dem til klassisk
-tekstanalyse, specifikt automatisk gruppering af udtalelserne i diverse
-kategorier. Alt i den her skript foregår lokalt uden at bruge eksterne API'er.
+tekstanalyse, specifikt automatisk gruppering af udtalelserne i
+diverse kategorier. Alt i den her skript foregår lokalt uden at
+bruge eksterne API'er.
 """
 
 # %% Generel opsætning
@@ -215,59 +216,58 @@ def fit_lda_model(
 
 print("Automatisk test af LDA emnemodeller er nu i gang...")
 
-# Unikke lovforslgassæsoner, som kræver test af modeller
-new_seasons = speech_tokens["Sæson"].unique().tolist()
+"""
+Obs: LDA modelleringen sker på tværs af hele datasættet for
+at kunne identificere emner, som gentages over tid. Pga. denne
+tilgang er det nødvendigt med LLM-assisteret mapping af emnerne
+hver gang, der kommer nye data fra Folketinget (2 gange om året).
+"""
 
-# Vi tester kun nye lovforslagssæsoner
-if prev_model_tests is not None and not prev_model_tests.empty:
-    tested_seasons = prev_model_tests["Sæson"].unique().tolist()
-else:
-    tested_seasons = []
-new_seasons = [season for season in new_seasons if season not in tested_seasons]
-n_seasons_test = len(new_seasons)
+# Brug dette til at tvinge LDA analysen selv om der ikke er nye data
+force_lda = False
 
-if n_seasons_test:
-    # Vi tester modeller med mellem 2-5 emner for enhver lovforslagssæson
-    n_topics = np.arange(2, 5)
+# Vi noterer den sidste sæson, som er dækket af dataenee
+latest_season = speech_tokens["Sæson"].iloc[-1]
+
+# Vi tjekker om der er kommet nye data fra Folketinget: hvis ikke,
+# så springer vi over LDA emneanalysen
+latest_lda_season = prev_auto_topics["SæsonOpdateret"].iloc[0]
+new_data_available = latest_lda_season != latest_season
+
+if new_data_available or force_lda:
+    # Vi tester modeller med mellem 2-15 emner i alt
+    n_topics = np.arange(2, 16)
     median_probability = []
     perplexity_score = []
-    seasons_for_df = []
     topics_for_df = []
 
-    for tmp_season in tqdm(new_seasons, total=n_seasons_test):
-        # Vi afgrænser dataene til den relevante sæson
-        tmp_data = speech_tokens[speech_tokens["Sæson"] == tmp_season].copy()
-        for tmp_topic in n_topics:
-            # Vi tester forskellige antal emner i hver sæson
-            perpl_score, auto_topics, _ = fit_lda_model(
-                tmp_data, "Token", "UdtalelseId", tmp_topic, True
-            )
-            med_prob = auto_topics["Sandsynlighed"].median()
-            median_probability.append(med_prob)
-            perplexity_score.append(perpl_score)
-            seasons_for_df.append(tmp_season)
-            topics_for_df.append(tmp_topic)
+    # Resultaterne af de enkelte tests bliver noteret i et særskilt df
+    for tmp_topic in tqdm(n_topics, total=len(n_topics)):
+        perpl_score, auto_topics, _ = fit_lda_model(
+            speech_tokens, "Token", "UdtalelseId", tmp_topic, True
+        )
+        med_prob = auto_topics["Sandsynlighed"].median()
+        median_probability.append(med_prob)
+        perplexity_score.append(perpl_score)
+        topics_for_df.append(tmp_topic)
 
     # Vi opsummerer resultaterne af vores tests
     model_tests = pd.DataFrame(
         {
-            "Sæson": seasons_for_df,
             "AntalEmner": topics_for_df,
             "MedianResultat": median_probability,
             "PerplexityScore": perplexity_score,
         }
     )
-
-    # Vi sammensætter tidligere og nuværende resultater i et datasæt
-    model_tests = pd.concat([prev_model_tests, model_tests])
+    model_tests.insert(0, "SæsonOpdateret", latest_season)
 
     # Vi sorterer data
-    model_tests = model_tests.sort_values(["Sæson", "PerplexityScore"])
+    model_tests = model_tests.sort_values(["SæsonOpdateret", "PerplexityScore"])
     model_tests = model_tests.reset_index(drop=True)
+
     print("Automatisk test af LDA emnemodeller færdig.")
 
 else:
-    model_tests = prev_model_tests
     print("Obs: Springer over pga. mangel af nye input data.")
 
 
@@ -275,50 +275,20 @@ else:
 
 print("Gruppering af udtalelser i diverse emner er nu i gang...")
 
-# Unikke lovforslgassæsoner, som kræver gruppering i emner
-new_seasons = speech_tokens["Sæson"].unique().tolist()
-
-# Vi grupperer emner kun for nye lovforslagssæsoner
-if prev_auto_topics is not None and not prev_auto_topics.empty:
-    tested_seasons = prev_auto_topics["Sæson"].unique().tolist()
-else:
-    tested_seasons = []
-new_seasons = [season for season in new_seasons if season not in tested_seasons]
-n_seasons_group = len(new_seasons)
-
-if n_seasons_group:
-    # Her vi vil opbevare resultaterne af emnegrupperingen
-    auto_topics_df = []
-    auto_words_df = []
-
-    for tmp_season in tqdm(new_seasons, total=n_seasons_group):
-        # Vi afgrænser dataene til den relevante sæson
-        tmp_data = speech_tokens[speech_tokens["Sæson"] == tmp_season].copy()
-        tmp_models = model_tests[model_tests["Sæson"] == tmp_season].copy()
-
-        # Vi vælger den bedste model og bruger den til at gruppere udtalelserne i emner
-        best_model_n = tmp_models["AntalEmner"].iloc[0]
-        _, auto_topics, auto_words = fit_lda_model(
-            tmp_data, "Token", "UdtalelseId", best_model_n
-        )
-        auto_topics["Sæson"] = tmp_season
-        auto_words["Sæson"] = tmp_season
-        auto_topics_df.append(auto_topics)
-        auto_words_df.append(auto_words)
-
-    # Konverterer output til df format
-    auto_topics = pd.concat(auto_topics_df)
-    auto_words = pd.concat(auto_words_df)
-
-    # Vi sammensætter tidligere og nuværende resultater i et datasæt
-    auto_topics = pd.concat([prev_auto_topics, auto_topics])
-    auto_words = pd.concat([prev_auto_words, auto_words])
+if new_data_available or force_lda:
+    # Vi vælger den bedste model og bruger den til at gruppere udtalelserne i emner
+    best_model_n = model_tests["AntalEmner"].iloc[0]
+    _, auto_topics, auto_words = fit_lda_model(
+        speech_tokens, "Token", "UdtalelseId", best_model_n
+    )
+    auto_topics.insert(0, "SæsonOpdateret", latest_season)
+    auto_words.insert(0, "SæsonOpdateret", latest_season)
 
     # Vi sorterer data
     auto_topics = auto_topics.sort_values("UdtalelseId")
     auto_topics = auto_topics.reset_index(drop=True)
     auto_words = auto_words.sort_values(
-        by=["Sæson", "EmneId", "Vægt"], ascending=[True, True, False]
+        by=["SæsonOpdateret", "EmneId", "Vægt"], ascending=[True, True, False]
     )
     auto_words = auto_words.reset_index(drop=True)
 
@@ -386,9 +356,8 @@ else:
 # %% Eksport af de færdige analyser
 
 # Vi eksporterer datasæt med outputs kun hvis der er nye data
-if n_seasons_test:
+if new_data_available or force_lda:
     model_tests.to_parquet("output/results_topics_model_stats.parquet")
-if n_seasons_group:
     auto_topics.to_parquet("output/results_topics_auto.parquet")
     auto_words.to_parquet("output/results_words_auto.parquet")
 if n_seasons_count:

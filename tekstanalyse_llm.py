@@ -4,7 +4,7 @@ Tekstanalyse ved brug af OpenAIs LLM
 ====================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 08-07-2025
+Sidste opdatering: 24-07-2025
 
 I dette skript anvender vi OpenAIs sprogmodel til forskellige slags
 foremål, primært opsummering af lange udtalelser og gruppering af
@@ -24,11 +24,14 @@ from functions_llm import connect_to_openai, get_prompt, query_llm_multiple
 # Fjern advarsler, når .ffill() eller .bfill() anvendes
 pd.set_option("future.no_silent_downcasting", True)
 
-# Om visse dele af analysen skal opsummeres
+# Om visse dele af analysen skal udføres selv ved mangel af nye data
 # (Gælder kun i tilfælde, hvor ny data ikke trackes automatisk)
 # OBS: Sat til "True" hvis vi har nye input data fra Folketinget
-summarize_party_opinions = True
-summarize_personal_opinions = True
+summarize_party_opinions = False
+summarize_personal_opinions = False
+
+# Tving LLM-LDA analysen selv om der ikke er nye data
+force_lda = False
 
 # Maks antal requests pr. minut for Azure OpenAI API
 max_rpm = None  # or 20
@@ -168,60 +171,71 @@ else:
     print("Obs: Springer over pga. mangel af nye input data.")
 
 
-# %% LDA emner til menneskesprog
+# %% LDA emner til menneskesprog [WIP as of 24-07-2025]
 
 """
 Vi forsøger at danne menneskevenlige navne på de emner, som vores LDA
-model har skabt. Dette sker ved at udvalge de top 20% bedst klassificerede
-udtalelser, og skabe en samlet tekst af deres opsummeringer. Vi beder derefter
-OpenAI modellen til at lave en kort, men deskriptiv overskrift til hver tekst.
+model har skabt. Dette sker ved at udvalge op til 20% af de bedst
+klassificerede udtalelser, og skabe en samlet tekst af deres
+opsummeringer. Hvis tekstlængden af disse overstiger 20,000 symboler,
+bruger vi kun de første 20,000 symboler. Vi beder derefter OpenAI
+modellen til at lave en kort, men deskriptiv overskrift til
+hver tekst.
 """
 
 print("Omdannelse af LDA emner til menneskesprog er nu ingang...")
 
-# For hvert emne finder vi de top 20% udtalelser med højest præcision
-pct_for_sampling = 0.20
-sort_vars = ["Sæson", "EmneNr", "Sandsynlighed"]
-sort_vars_asc = [True, True, False]
-group_vars = ["Sæson", "EmneNr"]
-best_fitting = auto_topics.copy()
-best_fitting = best_fitting.sort_values(by=sort_vars, ascending=sort_vars_asc)
-best_fitting["ScoreRank"] = best_fitting.groupby(group_vars).cumcount() + 1
-best_fitting["MaxRank"] = best_fitting.groupby(group_vars)["ScoreRank"].transform("max")
-best_fitting["ScoreRank_Pct"] = best_fitting["ScoreRank"] / best_fitting["MaxRank"]
+# Vi noterer den sidste sæson, som er dækket af dataenee
+latest_season = speech_tokens["UdtalelseId"].iloc[-1][:6]
 
-# Vi beriger dataene med opsummeringen af de enkelte udtalelser
-best_fitting = best_fitting[best_fitting["ScoreRank_Pct"] <= pct_for_sampling].copy()
-topic_summaries = pd.merge(
-    best_fitting,
-    speech_summaries[["UdtalelseId", "Opsummering"]],
-    how="left",
-    on="UdtalelseId",
-)
+# Vi tjekker om der er kommet nye data fra Folketinget: hvis ikke,
+# så springer vi over LDA emneanalysen
+latest_lda_season = auto_topics["SæsonOpdateret"].iloc[0]
+new_data_available = latest_lda_season != latest_season
 
-# Vi forbereder dataene til brug i modellen
-topic_summaries = topic_summaries.groupby(["Sæson", "EmneNr"], as_index=False).agg(
-    {"Opsummering": lambda x: " ".join(x)}
-)
-topic_summaries = topic_summaries.drop_duplicates()
-topic_summaries["EmneId"] = topic_summaries["Sæson"] + "_" + topic_summaries["EmneNr"]
+if new_data_available or force_lda:
+    # For hvert emne finder vi de top 20% udtalelser med højest præcision
+    pct_for_sampling = 0.20
+    max_n_characters = 20000
+    sort_vars = ["EmneNr", "Sandsynlighed"]
+    sort_vars_asc = [True, False]
+    group_vars = ["EmneNr"]
+    best_fitting = auto_topics.copy()
+    best_fitting = best_fitting.sort_values(by=sort_vars, ascending=sort_vars_asc)
+    best_fitting["ScoreRank"] = best_fitting.groupby(group_vars).cumcount() + 1
+    best_fitting["MaxRank"] = best_fitting.groupby(group_vars)["ScoreRank"].transform(
+        "max"
+    )
+    best_fitting["ScoreRank_Pct"] = best_fitting["ScoreRank"] / best_fitting["MaxRank"]
 
-# Vi opsummerer kun data, som er nye
-if prev_topic_auto_names is not None and not prev_topic_auto_names.empty:
-    new_topics = topic_summaries[
-        ~topic_summaries["EmneId"].isin(prev_topic_auto_names["Id"])
+    # Vi beriger dataene med opsummeringen af de enkelte udtalelser
+    best_fitting = best_fitting[
+        best_fitting["ScoreRank_Pct"] <= pct_for_sampling
     ].copy()
-else:
-    new_topics = topic_summaries.copy()
-n_new_topics = len(new_topics)
+    topic_summaries = pd.merge(
+        best_fitting,
+        speech_summaries[["UdtalelseId", "Opsummering"]],
+        how="left",
+        on="UdtalelseId",
+    )
 
-# Vi giver modellen følgende instruktioner
-system_prompt = get_prompt("emnefortolkning.txt")
+    # Vi forbereder dataene til brug i modellen
+    topic_summaries = topic_summaries.groupby(["EmneNr"], as_index=False).agg(
+        {"Opsummering": lambda x: " ".join(x)}
+    )
+    topic_summaries = topic_summaries.drop_duplicates()
+    topic_summaries["EmneId"] = topic_summaries["EmneNr"].str.extract(r"(\d+)")
+    topic_summaries["EmneId"] = topic_summaries["EmneId"].astype(int)
+    topic_summaries["Opsummering"] = topic_summaries["Opsummering"].str.slice(
+        0, max_n_characters
+    )
 
-if n_new_topics:
+    # Vi giver modellen følgende instruktioner
+    system_prompt = get_prompt("emnefortolkning.txt")
+
     # Vi danner menneskevenlige emner pba. opsummeringerne for hvert emne
-    full_texts = new_topics["Opsummering"].tolist()
-    full_ids = new_topics["EmneId"].tolist()
+    full_texts = topic_summaries["Opsummering"].tolist()
+    full_ids = topic_summaries["EmneId"].tolist()
     topic_auto_names = query_llm_multiple(
         openai_client, system_prompt, full_texts, full_ids, max_rpm=max_rpm
     )
@@ -232,16 +246,12 @@ if n_new_topics:
     topic_auto_names = topic_auto_names.rename(columns=cols_to_rename)
     topic_auto_names = topic_auto_names[cols_to_keep]
 
-    # Vi sammensætter tidligere og nuværende resultater i et datasæt
-    topic_auto_names = pd.concat([prev_topic_auto_names, topic_auto_names])
-
     # Vi sorterer og eksporterer data
     topic_auto_names = topic_auto_names.sort_values("Id")
     topic_auto_names = topic_auto_names.reset_index(drop=True)
     topic_auto_names.to_parquet("output/results_llm_lda_topics.parquet")
-    topic_auto_names.to_excel(
-        "output/results_llm_lda_topics.xlsx", index=False
-    )  # til brug for mapping
+    # Obs: Denne version er kun til brug for mapping
+    topic_auto_names.to_excel("output/results_llm_lda_topics.xlsx", index=False)
 
     print("LDA emner er nu omdannet til menneskesprog.")
 
