@@ -25,7 +25,7 @@ from tqdm import tqdm
 from typing import Tuple
 
 # Brug dette til at tvinge LDA analysen selv om der ikke er nye data
-force_lda = True  # WIP as of 24-07-2025
+force_lda = False
 
 # Import af data, som allerede er blevet renset
 all_debates = pd.read_parquet("output/ft_behandlinger.parquet")

@@ -4,7 +4,7 @@ Tekstanalyse ved brug af OpenAIs LLM
 ====================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 24-07-2025
+Sidste opdatering: 25-07-2025
 
 I dette skript anvender vi OpenAIs sprogmodel til forskellige slags
 foremål, primært opsummering af lange udtalelser og gruppering af
@@ -19,7 +19,12 @@ og skabe nogle indsigter, som er mere letforståelige end fx LDA.
 import os
 import pandas as pd
 import numpy as np
-from functions_llm import connect_to_openai, get_prompt, query_llm_multiple
+from functions_llm import (
+    connect_to_openai,
+    get_prompt,
+    query_llm_multiple,
+    SentimentScore,
+)
 
 # Fjern advarsler, når .ffill() eller .bfill() anvendes
 pd.set_option("future.no_silent_downcasting", True)
@@ -31,10 +36,13 @@ summarize_party_opinions = False
 summarize_personal_opinions = False
 
 # Tving LLM-LDA analysen selv om der ikke er nye data
-force_lda = True  # WIP as of 24-07-2025
+force_lda = False
+
+# Tving genberegning af sentiment score selv om der ikke er nye data
+force_sentiment = False
 
 # Maks antal requests pr. minut for Azure OpenAI API
-max_rpm = None  # or 20
+max_rpm = 50  # None or e.g. 20
 
 # Maks længde for tekster, som ikke skal opsummmeres (antal tegn)
 max_length = 160
@@ -59,6 +67,12 @@ file_path_topics = "output/results_llm_lda_topics.parquet"
 prev_topic_auto_names = (
     pd.read_parquet(file_path_topics) if os.path.exists(file_path_topics) else None
 )
+file_path_sentiment = "output/results_llm_sentiment.parquet"
+prev_llm_sentiment = (
+    pd.read_parquet(file_path_sentiment)
+    if os.path.exists(file_path_sentiment)
+    else None
+)
 
 # Forbereder endpoint og headers til Azure OpenAI API
 api_access = "credentials/azure_openai_access.yaml"
@@ -77,6 +91,77 @@ all_debates["ApolitiskUdtalelse"] = (condition_1) | (condition_2)
 
 # Vi markerer de resterende rækker, som skal bruges ifm. OpenAI modellen
 all_debates["OpsummerUdtalelse"] = ~all_debates["ApolitiskUdtalelse"]
+
+
+# %% Beregning af sentiment score ved brug af AI [WIP as of 25-07-2025]
+
+"""
+Som et alternativ til 'sentida' pakken, som ikke producerer de mest
+meningsfulde resultater, kan vi anvende en LLM til at at læse alle
+udtalelser og give en sentiment score fra -5 til +5, hvor 0 kan
+betragtes som neutral.
+
+# WIP as of 25-07-2025: tilføj mekanisme for kun at behandle nye
+udtalelser i kildedataene (efter vi har dannet et datasæt, som kan
+bruges som udgangspunkt)
+"""
+
+print("Beregning af sentiment score ved brug af AI i gang...")
+
+# Vi giver modellen følgende instruktioner
+system_prompt = get_prompt("sentiment.txt")
+
+# Resten af koden er stadigvæk WIP...
+
+# WIP filtrering for at teste structured LLM output
+# WIP: Filtering the data X years at a time
+try_years = [2022, 2023, 2024, 2025]
+new_speeches = all_debates[all_debates["År"].isin(try_years)].copy()
+
+# Vi behandler kun længere og politiske udtalelser
+to_analyze = new_speeches[new_speeches["OpsummerUdtalelse"]].copy()
+not_to_analyze = new_speeches[~new_speeches["OpsummerUdtalelse"]].copy()
+
+# Vi forbereder relevante udtalelser til beregning af sentiment
+full_speeches = to_analyze["Udtalelse"].tolist()
+full_ids = to_analyze["UdtalelseId"].tolist()
+
+# Vi opsummerer alle relevante udtalelser
+new_sentiment = query_llm_multiple(
+    openai_client,
+    system_prompt,
+    full_speeches,
+    full_ids,
+    max_rpm=max_rpm,
+    response_format=SentimentScore,
+)
+
+# Vi omdøber visse kolonner
+col_names = {
+    "Id": "UdtalelseId",
+    "Response": "Sentiment",
+    "hate": "SprogbrugHad",
+    "self_harm": "SprogbrugSelvskade",
+    "sexual": "SprogbrugSex",
+    "violence": "SprogbrugVold",
+}
+new_sentiment = new_sentiment.rename(columns=col_names)
+
+# Vi sikrer, at "Sentiment" altid er et tal
+new_sentiment["Sentiment"] = pd.to_numeric(new_sentiment["Sentiment"], errors="coerce")
+
+# Vi tilføjer baggrundsinfo til dataene
+new_sentiment["DannetAfModel"] = "GPT-4o-mini"
+
+# Vi sammensætter tidligere og nuværende resultater i et datasæt
+llm_sentiment = pd.concat([prev_llm_sentiment, new_sentiment])
+
+# Vi sorterer og eksporterer data
+llm_sentiment = llm_sentiment.sort_values("UdtalelseId")
+llm_sentiment = llm_sentiment.reset_index(drop=True)
+llm_sentiment.to_parquet("output/results_llm_sentiment.parquet")
+
+print("Beregning af sentiment score ved brug af AI færdig.")
 
 
 # %% Opsummering af alle relevante udtalelser
@@ -113,7 +198,7 @@ if n_new_speeches:
         openai_client, system_prompt, full_speeches, full_ids, max_rpm=max_rpm
     )
 
-    # Vi omdøber visser kolonner
+    # Vi omdøber visse kolonner
     col_names = {
         "Id": "UdtalelseId",
         "Response": "Opsummering",
@@ -209,9 +294,11 @@ if new_data_available or force_lda:
     best_fitting["ScoreRank_Pct"] = best_fitting["ScoreRank"] / best_fitting["MaxRank"]
 
     # Vi beriger dataene med opsummeringen af de enkelte udtalelser
+    # Obs: vi beholder altid mindst 1 udtalelse pr. emne
     best_fitting = best_fitting[
-        best_fitting["ScoreRank_Pct"] <= pct_for_sampling
-    ].copy()
+        (best_fitting["ScoreRank_Pct"] <= pct_for_sampling)
+        | (best_fitting["ScoreRank"] == 1)
+    ]
     topic_summaries = pd.merge(
         best_fitting,
         speech_summaries[["UdtalelseId", "Opsummering"]],

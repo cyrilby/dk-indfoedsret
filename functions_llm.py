@@ -4,7 +4,7 @@ Customs function for extracting features using LLMs
 ===================================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 13-11-2024
+Sidste opdatering: 25-07-2025
 
 In this script, we create several different functions that allow
 us to extract relevant vessel features using OpenAI's LLM model.
@@ -19,8 +19,11 @@ import re
 import time
 import pandas as pd
 from openai import AzureOpenAI, BadRequestError
+from pydantic import BaseModel
 from tqdm import tqdm
 import yaml
+import json
+from typing import Literal
 
 
 # %% Custom function for getting access to the API
@@ -82,6 +85,35 @@ def get_prompt(prompt_file: str) -> str:
     return None
 
 
+# %% Custom function for converting str to dict
+
+
+def str_to_dict(data_str: str) -> dict:
+    """
+    Converts a string representing a dictionary that the API
+    returns into a proper Pythonic dictionary.
+    """
+    # Replace 'None' with 'null' to make it valid JSON
+    if data_str:
+        data_str = data_str.replace("None", "null")
+        data_str = json.loads(data_str)
+    # Convert to dictionary
+    return data_str
+
+
+# %% Custom class for getting a specific response from the LLM
+
+
+class SentimentScore(BaseModel):
+    """
+    To be used when trying to assess sentiment score on a scale
+    between -5 and +5, with 0 being a rather neutral score. No
+    missing values are allowed for the sentiment score.
+    """
+
+    response: Literal[-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
+
+
 # %% Custom function for a one-time query to the OpenAI model
 
 
@@ -90,6 +122,7 @@ def query_llm(
     system_prompt: str,
     user_prompt: str,
     model_name: str = "gpt-4o-mini",
+    response_format: BaseModel | None = None,
     temperature: float = 0.7,
     max_tokens: int | None = None,
 ) -> tuple | None:
@@ -102,6 +135,10 @@ def query_llm(
         system_prompt (str): text to use as system prompt
         user_prompt (str): text to use as the user prompt
         model_name (str): name of the OpenAI model to use.
+        response_format (BaseModel): a pydantic BaseModel Class
+        object that defines the rules which the extract values
+        should conform to (e.g. data type, permissible values, etc.)
+        Defaults to None.
         temperature (float, optional): temperature. Defaults to 0.7.
         max_tokens (int, optional): max_tokens. Defaults to None.
 
@@ -111,28 +148,46 @@ def query_llm(
     """
     try:
         # Query the model with provided prompts and parameters
-        completion = openai_client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        if response_format:
+            completion = openai_client.beta.chat.completions.parse(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                response_format=response_format,
+                max_tokens=max_tokens,
+            )
+        else:
+            completion = openai_client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
 
         # If completion is successful, return the response content
         if completion:
             response = completion.choices[0].message.content
 
-            # Alsoxtract content filter details as a df
+            # Structured output requires additional extraction
+            if response_format:
+                response = str_to_dict(response)
+                response = response["response"]
+
+            # Also extract content filter details as a df
             filter_results = completion.prompt_filter_results[0][
                 "content_filter_results"
             ]
             filter_results = pd.DataFrame.from_dict(filter_results, orient="index")
-            filter_results = filter_results[["severity"]].copy()
-            filter_results = filter_results.dropna()
-            filter_results = filter_results.T
+            if "severity" in filter_results.columns:
+                filter_results = filter_results[["severity"]].copy()
+                filter_results = filter_results.dropna()
+                filter_results = filter_results.T
 
             return response, filter_results
 
@@ -150,17 +205,14 @@ def query_llm(
             filter_results = pd.DataFrame.from_dict(
                 content_filter_result, orient="index"
             )
-            filter_results = filter_results[["severity"]].copy()
-            filter_results = filter_results.dropna()
-            filter_results = filter_results.T
+            if "severity" in filter_results.columns:
+                filter_results = filter_results[["severity"]].dropna().T
 
         else:
             filter_results = pd.DataFrame({"filter_results": [None]})
 
         # Record custom response in case filtering is triggered
-        custom_response = (
-            "Obs: Indhold kan ikke opsummeres pga. brug af et farligt sprog."
-        )
+        custom_response = "Obs: Indhold kan ikke opsummeres pga. brug af farligt sprog."
 
         return custom_response, filter_results
 
@@ -178,6 +230,7 @@ def query_llm_multiple(
     data_ids: list,
     min_len: int = 3,
     max_rpm: int | None = 20,
+    response_format: BaseModel | None = None,
     **kwargs,
 ) -> pd.DataFrame:
     """
@@ -198,6 +251,10 @@ def query_llm_multiple(
         if the string is considered valid to be processed by an LLM.
         max_rpm (int, optional): max requests per minute for the
         API. Defaults to 20. Set to None for unlimited requests.
+        response_format (BaseModel): a pydantic BaseModel Class
+        object that defines the rules which the extract values
+        should conform to (e.g. data type, permissible values, etc.)
+        Defaults to None.
         **kwargs: relevant arguments to be passed on to the
         query_llm() function.
 
@@ -239,6 +296,7 @@ def query_llm_multiple(
                 openai_client=openai_client,
                 system_prompt=system_prompt,
                 user_prompt=text_clean,
+                response_format=response_format,
                 **kwargs,
             )
             request_count += 1
