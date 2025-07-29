@@ -4,7 +4,7 @@ Tekstanalyse ved brug af OpenAIs LLM
 ====================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 25-07-2025
+Sidste opdatering: 29-07-2025
 
 I dette skript anvender vi OpenAIs sprogmodel til forskellige slags
 foremål, primært opsummering af lange udtalelser og gruppering af
@@ -23,7 +23,6 @@ from functions_llm import (
     connect_to_openai,
     get_prompt,
     query_llm_multiple,
-    SentimentScore,
 )
 
 # Fjern advarsler, når .ffill() eller .bfill() anvendes
@@ -91,77 +90,6 @@ all_debates["ApolitiskUdtalelse"] = (condition_1) | (condition_2)
 
 # Vi markerer de resterende rækker, som skal bruges ifm. OpenAI modellen
 all_debates["OpsummerUdtalelse"] = ~all_debates["ApolitiskUdtalelse"]
-
-
-# %% Beregning af sentiment score ved brug af AI [WIP as of 25-07-2025]
-
-"""
-Som et alternativ til 'sentida' pakken, som ikke producerer de mest
-meningsfulde resultater, kan vi anvende en LLM til at at læse alle
-udtalelser og give en sentiment score fra -5 til +5, hvor 0 kan
-betragtes som neutral.
-
-# WIP as of 25-07-2025: tilføj mekanisme for kun at behandle nye
-udtalelser i kildedataene (efter vi har dannet et datasæt, som kan
-bruges som udgangspunkt)
-"""
-
-print("Beregning af sentiment score ved brug af AI i gang...")
-
-# Vi giver modellen følgende instruktioner
-system_prompt = get_prompt("sentiment.txt")
-
-# Resten af koden er stadigvæk WIP...
-
-# WIP filtrering for at teste structured LLM output
-# WIP: Filtering the data X years at a time
-try_years = [2022, 2023, 2024, 2025]
-new_speeches = all_debates[all_debates["År"].isin(try_years)].copy()
-
-# Vi behandler kun længere og politiske udtalelser
-to_analyze = new_speeches[new_speeches["OpsummerUdtalelse"]].copy()
-not_to_analyze = new_speeches[~new_speeches["OpsummerUdtalelse"]].copy()
-
-# Vi forbereder relevante udtalelser til beregning af sentiment
-full_speeches = to_analyze["Udtalelse"].tolist()
-full_ids = to_analyze["UdtalelseId"].tolist()
-
-# Vi opsummerer alle relevante udtalelser
-new_sentiment = query_llm_multiple(
-    openai_client,
-    system_prompt,
-    full_speeches,
-    full_ids,
-    max_rpm=max_rpm,
-    response_format=SentimentScore,
-)
-
-# Vi omdøber visse kolonner
-col_names = {
-    "Id": "UdtalelseId",
-    "Response": "Sentiment",
-    "hate": "SprogbrugHad",
-    "self_harm": "SprogbrugSelvskade",
-    "sexual": "SprogbrugSex",
-    "violence": "SprogbrugVold",
-}
-new_sentiment = new_sentiment.rename(columns=col_names)
-
-# Vi sikrer, at "Sentiment" altid er et tal
-new_sentiment["Sentiment"] = pd.to_numeric(new_sentiment["Sentiment"], errors="coerce")
-
-# Vi tilføjer baggrundsinfo til dataene
-new_sentiment["DannetAfModel"] = "GPT-4o-mini"
-
-# Vi sammensætter tidligere og nuværende resultater i et datasæt
-llm_sentiment = pd.concat([prev_llm_sentiment, new_sentiment])
-
-# Vi sorterer og eksporterer data
-llm_sentiment = llm_sentiment.sort_values("UdtalelseId")
-llm_sentiment = llm_sentiment.reset_index(drop=True)
-llm_sentiment.to_parquet("output/results_llm_sentiment.parquet")
-
-print("Beregning af sentiment score ved brug af AI færdig.")
 
 
 # %% Opsummering af alle relevante udtalelser
@@ -256,7 +184,7 @@ else:
     print("Obs: Springer over pga. mangel af nye input data.")
 
 
-# %% LDA emner til menneskesprog [WIP as of 24-07-2025]
+# %% LDA emner til menneskesprog
 
 """
 Vi forsøger at danne menneskevenlige navne på de emner, som vores LDA

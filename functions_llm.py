@@ -4,7 +4,7 @@ Customs function for extracting features using LLMs
 ===================================================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 25-07-2025
+Sidste opdatering: 29-07-2025
 
 In this script, we create several different functions that allow
 us to extract relevant vessel features using OpenAI's LLM model.
@@ -23,7 +23,6 @@ from pydantic import BaseModel
 from tqdm import tqdm
 import yaml
 import json
-from typing import Literal
 
 
 # %% Custom function for getting access to the API
@@ -99,19 +98,6 @@ def str_to_dict(data_str: str) -> dict:
         data_str = json.loads(data_str)
     # Convert to dictionary
     return data_str
-
-
-# %% Custom class for getting a specific response from the LLM
-
-
-class SentimentScore(BaseModel):
-    """
-    To be used when trying to assess sentiment score on a scale
-    between -5 and +5, with 0 being a rather neutral score. No
-    missing values are allowed for the sentiment score.
-    """
-
-    response: Literal[-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
 
 
 # %% Custom function for a one-time query to the OpenAI model
