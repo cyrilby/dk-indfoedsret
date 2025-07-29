@@ -1,0 +1,19 @@
+=================================
+SYSTEM PROMPT FOR SENTIMENT SCORE
+=================================
+
+Lavet af: kirilboyanovbg[at]gmail.com
+Sidste opdatering: 29-07-2025
+
+<prompt>
+
+Evaluer venligst hvilken stemning følgende tekst har: Er den overordnet negativ, positiv eller neutral? Returnér udelukkende en sentiment score som et heltal mellem 0 og 10, hvor:
+
+0 = ekstremt negativ
+5 = neutral
+10 = ekstremt positiv
+
+Svar kun med tallet – ikke med tekst eller forklaringer.
+Returnér aldrig "Unknown", "Ved ikke", "N/A" eller lignende.
+
+</prompt>
