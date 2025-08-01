@@ -4,7 +4,7 @@ Opdatering af projektets data
 =============================
 
 Lavet af: kirilboyanovbg[at]gmail.com
-Sidste opdatering: 09-01-2025
+Sidste opdatering: 01-08-2025
 
 Dette skript kan bruges til at sikre, at alle data, som kommer
 som output fra projektet, er opdateret. Skriptet kalder nemlig
@@ -49,13 +49,16 @@ run_script("datarens_partihoppere.py")
 # Befolkningsdata m.fl. fra Danmarks Statistik
 run_script("datarens_befolkning.py")
 
-# Tekstanalyse del 1 af 3: tokenization, sentiment m.fl.
+# Tekstanalyse del 1 af 4: tokenization, ordfrekvenser m.fl.
 run_script("tekstanalyse_ord.py")
 
-# Tekstanalyse del 2 af 3: emenenalyse gennem LDA model
+# Tekstanalyse del 2 af 4: sentiment analyse
+run_script("tekstanalyse_sentiment.py")
+
+# Tekstanalyse del 3 af 4: emenenalyse gennem LDA model
 run_script("tekstanalyse_emner.py")
 
-# Tekstanalyse del 3 af 3: opsummeringer m.fl. gennem ChatGPT
+# Tekstanalyse del 4 af 4: opsummeringer m.fl. gennem ChatGPT
 run_script("tekstanalyse_llm.py")
 
 print("Alle data er nu opdateret.")

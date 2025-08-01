@@ -37,9 +37,6 @@ summarize_personal_opinions = False
 # Tving LLM-LDA analysen selv om der ikke er nye data
 force_lda = False
 
-# Tving genberegning af sentiment score selv om der ikke er nye data
-force_sentiment = False
-
 # Maks antal requests pr. minut for Azure OpenAI API
 max_rpm = 50  # None or e.g. 20
 
@@ -65,12 +62,6 @@ prev_speech_summaries = (
 file_path_topics = "output/results_llm_lda_topics.parquet"
 prev_topic_auto_names = (
     pd.read_parquet(file_path_topics) if os.path.exists(file_path_topics) else None
-)
-file_path_sentiment = "output/results_llm_sentiment.parquet"
-prev_llm_sentiment = (
-    pd.read_parquet(file_path_sentiment)
-    if os.path.exists(file_path_sentiment)
-    else None
 )
 
 # Forbereder endpoint og headers til Azure OpenAI API
