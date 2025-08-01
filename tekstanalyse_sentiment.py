@@ -20,7 +20,7 @@ import pandas as pd
 from functions_sentiment import download_model, make_clf_pipeline, get_sentiment_df
 
 # Tving genberegning af sentiment score selv om der ikke er nye data
-force_sentiment = True  # WIP as of 01-08-2025
+force_sentiment = False
 
 # Tving offline kørsel af HuggingFace modellen
 download_model()
@@ -78,10 +78,18 @@ if n_new_speeches:
     sentiment = get_sentiment_df(model_pipeline, all_speeches, all_ids)
 
     # Vi oversætter outputtet til dansk
-    col_names = {"label": "Stemning", "score": "Sandsynlighed", "id": "UdtalelseId"}
+    col_names = {
+        "label": "StemningTekst",
+        "score": "Sandsynlighed",
+        "id": "UdtalelseId",
+    }
     translations = {"negative": "Negativ", "positive": "Positiv", "neutral": "Neutral"}
     sentiment = sentiment.rename(columns=col_names)
-    sentiment["Stemning"] = sentiment["Stemning"].replace(translations)
+    sentiment["StemningTekst"] = sentiment["StemningTekst"].replace(translations)
+
+    # Vi tilføjer en numerisk kolonne for talestemning
+    values = {"Positiv": 1, "Neutral": 0, "Negativ": -1}
+    sentiment["Stemning"] = sentiment["StemningTekst"].replace(values)
 
     # Vi tilføjer ID'er i tilfælde af, at en udtalelses stemning
     # er delt over flere rækker pga. at udtalelsen er for lang
@@ -92,6 +100,7 @@ if n_new_speeches:
         "UdtalelseId",
         "UdtalelseDel",
         "Stemning",
+        "StemningTekst",
         "Sandsynlighed",
     ]
     sentiment = sentiment[cols_to_keep]
@@ -108,11 +117,6 @@ if n_new_speeches:
 
 else:
     print("Obs: Springer over pga. mangel af nye input data.")
-
-
-# !!!!!!!!!!!!!!!!!!!! WIP !!!!!!!!!!!!!!!!!!!!
-# Remember to add an integer column for sentiment (-1, 0 or +1)
-# as we would need that for Power BI visualizations...
 
 print("FÆRDIG.")
 
