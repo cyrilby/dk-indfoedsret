@@ -11,6 +11,7 @@ som indeholder diverse taler ("udtalelser"), og bruge dem til klassisk
 tekstanalyse, specifikt automatisk gruppering af udtalelserne i
 diverse kategorier. Alt i den her skript foregår lokalt uden at
 bruge eksterne API'er.
+Der anvendes en LDA model til klassificeringen af teksterne.
 """
 
 # %% Generel opsætning

@@ -6,8 +6,9 @@ Customs function for sentiment analysis
 Lavet af: kirilboyanovbg[at]gmail.com
 Sidste opdatering: 01-08-2025
 
-In this script, we create several different functions that allow
-us to download and apply a HuggingFace model for sentiment analysis.
+Dette skript indeholder funktioner, som gør det muligt at hente
+en sporgmodel fra HuggingFace, og anvende den til sentiment
+analyse uden at det påkræver en forbindelse til nettet.
 """
 
 # %% Setting things up

@@ -6,11 +6,11 @@ Håndtering af partihoppere
 Lavet af: kirilboyanovbg[at]gmail.com
 Sidste opdatering: 08-07-2025
 
-Formålet ved dette skript er at lave  en "hjælpetabel", som indeholder
-de seneste partigrupper for de såkaldte "partihoppere". Dette vil gøre
-det nemmere at filtrere på personer i Power BI, og vil sikre, at vi
+Formålet ved dette skript er at lave en "hjælpetabel", som indeholder
+de seneste partigrupper for de såkaldte "partihoppere". Dette gør
+det nemmere at filtrere på personer i Power BI, og  sikrer, at vi
 ikke optæller den samme politiker som to forskellige personer, fx
-når vi opsummerer deres holdninger gennem OpenAIs LLM.
+når vi opsummerer deres holdninger gennem en LLM.
 """
 
 # %% Generel opsætning

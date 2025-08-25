@@ -6,10 +6,9 @@ Customs function for extracting features using LLMs
 Lavet af: kirilboyanovbg[at]gmail.com
 Sidste opdatering: 29-07-2025
 
-In this script, we create several different functions that allow
-us to extract relevant vessel features using OpenAI's LLM model.
-These can then be applied to either Softship data or data
-originating from relevant mailboxes.
+Dette skript indeholder funktioner, som gør det muligt at
+forbinde til OpenAIs LLM model, og anvende den til forskellige
+formål, fx opsummering af tekst, oversættelse osv.
 """
 
 # %% Setting things up
