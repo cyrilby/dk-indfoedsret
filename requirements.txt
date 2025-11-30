@@ -13,5 +13,4 @@ pyarrow==18.1.0
 pydantic==2.9.2
 transformers==4.54.1
 torch==2.7.1
-plotly==5.20.0 # WIP as of 21-11-2025, for charting only
-bokeh==3.8.1 # WIP as of 21-11-2025, for charting only
+altair==6.0.0
