@@ -14,3 +14,4 @@ pydantic==2.9.2
 transformers==4.54.1
 torch==2.7.1
 altair==6.0.0
+vl-convert-python==1.8.0
